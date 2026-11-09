@@ -7,13 +7,38 @@ from datetime import datetime
 class FileUtilityApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("AE_FileUtility - Multi-Destination File Utility")
-        self.root.geometry("680x600")
-        self.root.minsize(620, 550)
+        self.root.title("AE_FileUtility - Pro File Manager")
+        self.root.geometry("720x640")
+        self.root.minsize(650, 580)
 
-        # Style
+        # Configure Modern Styles & Palette
         style = ttk.Style()
         style.theme_use("clam")
+
+        # Color Palette Definition
+        self.bg_color = "#f4f6f9"
+        self.primary_color = "#2563eb"  # Modern Royal Blue
+        self.primary_hover = "#1d4ed8"
+        self.text_color = "#1f2937"
+        self.border_color = "#d1d5db"
+
+        self.root.configure(bg=self.bg_color)
+
+        # Configure TTK Styles
+        style.configure(".", font=("Segoe UI", 10), background=self.bg_color, foreground=self.text_color)
+        style.configure("TLabel", background=self.bg_color, foreground=self.text_color)
+        style.configure("TLabelframe", background=self.bg_color, bordercolor=self.border_color, borderwidth=1)
+        style.configure("TLabelframe.Label", font=("Segoe UI", 10, "bold"), background=self.bg_color, foreground=self.primary_color)
+        
+        # Standard Button Style
+        style.configure("TButton", font=("Segoe UI", 10), padding=6, relief="flat", background="#e5e7eb")
+        style.map("TButton", background=[("active", "#d1d5db"), ("pressed", "#9ca3af")])
+
+        # Primary Action Button Style
+        style.configure("Primary.TButton", font=("Segoe UI", 11, "bold"), background=self.primary_color, foreground="#ffffff", padding=8)
+        style.map("Primary.TButton", 
+                  background=[("active", self.primary_hover), ("pressed", "#1e40af")],
+                  foreground=[("active", "#ffffff"), ("pressed", "#ffffff")])
 
         # Variables
         self.list_path_var = tk.StringVar()
@@ -24,62 +49,62 @@ class FileUtilityApp:
         self.create_widgets()
 
     def create_widgets(self):
-        # Main Frame
-        main_frame = ttk.Frame(self.root, padding=10)
+        # Main Container with Padding
+        main_frame = ttk.Frame(self.root, padding=15)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # 0. Template Download Section
-        template_frame = ttk.LabelFrame(main_frame, text=" 0. Quick Start Template ", padding=8)
-        template_frame.pack(fill=tk.X, pady=(0, 5))
+        # 0. Template Download Section (Styled Banner)
+        template_frame = ttk.LabelFrame(main_frame, text=" 📥 Quick Start Template ", padding=10)
+        template_frame.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_tip = ttk.Label(template_frame, text="Need a template? Download the sample TXT file, fill it, and use it below.")
+        lbl_tip = ttk.Label(template_frame, text="Download the TXT template. It includes clear instructions & examples for all 3 operations.")
         lbl_tip.pack(side=tk.LEFT, padx=5)
 
         btn_download_template = ttk.Button(template_frame, text="Download Template", command=self.download_template)
         btn_download_template.pack(side=tk.RIGHT, padx=5)
 
         # 1. File Selection Section
-        file_frame = ttk.LabelFrame(main_frame, text=" 1. Select TXT Configuration File ", padding=10)
-        file_frame.pack(fill=tk.X, pady=5)
+        file_frame = ttk.LabelFrame(main_frame, text=" 📂 1. Select TXT Configuration File ", padding=10)
+        file_frame.pack(fill=tk.X, pady=(0, 10))
 
-        self.entry_path = ttk.Entry(file_frame, textvariable=self.list_path_var, width=45)
-        self.entry_path.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self.entry_path = ttk.Entry(file_frame, textvariable=self.list_path_var, font=("Segoe UI", 10))
+        self.entry_path.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
 
         btn_browse = ttk.Button(file_frame, text="Browse...", command=self.browse_file)
         btn_browse.pack(side=tk.RIGHT)
 
-        # Options Frame (Side by Side)
+        # Options Container (Side by Side Frames)
         options_container = ttk.Frame(main_frame)
-        options_container.pack(fill=tk.X, pady=5)
+        options_container.pack(fill=tk.X, pady=(0, 10))
 
         # 2. Action Choice
-        action_frame = ttk.LabelFrame(options_container, text=" 2. Choose Action ", padding=10)
+        action_frame = ttk.LabelFrame(options_container, text=" ⚙️ 2. Choose Action ", padding=10)
         action_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
-        ttk.Radiobutton(action_frame, text="Copy files", variable=self.action_choice, value=1, command=self.toggle_overwrite_state).pack(anchor=tk.W, pady=2)
-        ttk.Radiobutton(action_frame, text="Move files", variable=self.action_choice, value=2, command=self.toggle_overwrite_state).pack(anchor=tk.W, pady=2)
-        ttk.Radiobutton(action_frame, text="Rename in-place only", variable=self.action_choice, value=3, command=self.toggle_overwrite_state).pack(anchor=tk.W, pady=2)
+        ttk.Radiobutton(action_frame, text="Copy files", variable=self.action_choice, value=1, command=self.toggle_overwrite_state).pack(anchor=tk.W, pady=3)
+        ttk.Radiobutton(action_frame, text="Move files", variable=self.action_choice, value=2, command=self.toggle_overwrite_state).pack(anchor=tk.W, pady=3)
+        ttk.Radiobutton(action_frame, text="Rename in-place only", variable=self.action_choice, value=3, command=self.toggle_overwrite_state).pack(anchor=tk.W, pady=3)
 
         # 3. Overwrite Mode
-        self.overwrite_frame = ttk.LabelFrame(options_container, text=" 3. Overwrite Mode ", padding=10)
+        self.overwrite_frame = ttk.LabelFrame(options_container, text=" 🔄 3. Overwrite Mode ", padding=10)
         self.overwrite_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
 
         self.rb_ow_1 = ttk.Radiobutton(self.overwrite_frame, text="Overwrite existing", variable=self.overwrite_choice, value=1)
-        self.rb_ow_1.pack(anchor=tk.W, pady=2)
+        self.rb_ow_1.pack(anchor=tk.W, pady=3)
         self.rb_ow_2 = ttk.Radiobutton(self.overwrite_frame, text="Auto-number duplicates", variable=self.overwrite_choice, value=2)
-        self.rb_ow_2.pack(anchor=tk.W, pady=2)
+        self.rb_ow_2.pack(anchor=tk.W, pady=3)
         self.rb_ow_3 = ttk.Radiobutton(self.overwrite_frame, text="Skip existing", variable=self.overwrite_choice, value=3)
-        self.rb_ow_3.pack(anchor=tk.W, pady=2)
+        self.rb_ow_3.pack(anchor=tk.W, pady=3)
 
         # Run Button
-        self.btn_run = ttk.Button(main_frame, text="Start Operation", command=self.run_operation)
-        self.btn_run.pack(fill=tk.X, pady=8)
+        self.btn_run = ttk.Button(main_frame, text="🚀 Start Operation", command=self.run_operation, style="Primary.TButton")
+        self.btn_run.pack(fill=tk.X, pady=(0, 10))
 
-        # Log Console Area & Export Report Button Container
-        log_frame = ttk.LabelFrame(main_frame, text=" Live Output & Logs ", padding=5)
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        # Log Console Area
+        log_frame = ttk.LabelFrame(main_frame, text=" 💻 Live Output & Logs ", padding=8)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
-        self.log_text = tk.Text(log_frame, wrap=tk.WORD, height=10, bg="#1e1e1e", fg="#d4d4d4", font=("Consolas", 9))
+        self.log_text = tk.Text(log_frame, wrap=tk.WORD, height=11, bg="#1e1e1e", fg="#4ec9b0", font=("Consolas", 9), bd=0, highlightthickness=0)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
@@ -88,9 +113,9 @@ class FileUtilityApp:
 
         # Bottom Bar for Report Export
         bottom_bar = ttk.Frame(main_frame)
-        bottom_bar.pack(fill=tk.X, pady=(5, 0))
+        bottom_bar.pack(fill=tk.X)
 
-        self.btn_export_report = ttk.Button(bottom_bar, text="Download / Export Report (Tab-Delimited)", command=self.export_report, state=tk.DISABLED)
+        self.btn_export_report = ttk.Button(bottom_bar, text="📊 Download Tab-Delimited Report", command=self.export_report, state=tk.DISABLED)
         self.btn_export_report.pack(side=tk.RIGHT)
 
     def toggle_overwrite_state(self):
@@ -111,7 +136,14 @@ class FileUtilityApp:
             title="Save Template File"
         )
         if file_path:
+            # Template containing explicit instructions and examples separated by TAB
             template_content = (
+                "# === AE_FILEUTILITY CONFIGURATION TEMPLATE ===\n"
+                "# Format: 3 Columns separated by TAB character.\n"
+                "# Column 1: Source File Path (Required)\n"
+                "# Column 2: Destination Folder (Required for Copy/Move, leave blank for In-place Rename)\n"
+                "# Column 3: New File Name (Optional: leave blank to keep original name)\n"
+                "# -------------------------------------------------------------------------\n"
                 "C:\\Docs\\file.pdf\tD:\\Backup\tReport_2026.pdf\n"
                 "C:\\Images\\photo.jpg\tE:\\Photos\t\n"
                 "D:\\Work\\Data.xlsx\t\tData_V2.xlsx\n"
@@ -119,7 +151,7 @@ class FileUtilityApp:
             try:
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(template_content)
-                messagebox.showinfo("Success", f"Template file successfully saved to:\n{file_path}")
+                messagebox.showinfo("Success", f"Template file with instructions successfully saved to:\n{file_path}")
             except Exception as e:
                 messagebox.showerror("Error", f"Could not save template file: {e}")
 
@@ -184,7 +216,12 @@ class FileUtilityApp:
             return
 
         for line in lines:
-            parts = line.strip().split("\t")
+            line_str = line.strip()
+            # Skip comment lines starting with '#' or empty lines
+            if not line_str or line_str.startswith("#"):
+                continue
+
+            parts = line_str.split("\t")
             src_file = parts[0].strip() if len(parts) > 0 else ""
             dest_folder = parts[1].strip() if len(parts) > 1 else ""
             new_name = parts[2].strip() if len(parts) > 2 else ""
