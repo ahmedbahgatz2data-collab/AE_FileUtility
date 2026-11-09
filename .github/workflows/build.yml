@@ -1,4 +1,4 @@
-name: Build Windows Executable
+name: Build AE_FileUtility Executable
 
 on:
   push:
@@ -18,17 +18,17 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install Dependencies & PyInstaller
+    - name: Install PyInstaller
       run: |
         python -m pip install --upgrade pip
         pip install pyinstaller
 
     - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --noconsole --onefile app.py
+        pyinstaller --noconsole --onefile --name="AE_FileUtility" app.py
 
     - name: Upload Executable Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: FileUtility-Exe
-        path: dist/app.exe
+        name: AE_FileUtility-Exe
+        path: dist/AE_FileUtility.exe
