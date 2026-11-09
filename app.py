@@ -7,9 +7,9 @@ from datetime import datetime
 class FileUtilityApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Multi-Destination File Utility")
-        self.root.geometry("650x550")
-        self.root.minsize(600, 500)
+        self.root.title("AE_FileUtility - Multi-Destination File Utility")
+        self.root.geometry("680x600")
+        self.root.minsize(620, 550)
 
         # Style
         style = ttk.Style()
@@ -19,6 +19,7 @@ class FileUtilityApp:
         self.list_path_var = tk.StringVar()
         self.action_choice = tk.IntVar(value=1)
         self.overwrite_choice = tk.IntVar(value=1)
+        self.last_log_content = ""
 
         self.create_widgets()
 
@@ -27,11 +28,21 @@ class FileUtilityApp:
         main_frame = ttk.Frame(self.root, padding=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
+        # 0. Template Download Section
+        template_frame = ttk.LabelFrame(main_frame, text=" 0. Quick Start Template ", padding=8)
+        template_frame.pack(fill=tk.X, pady=(0, 5))
+
+        lbl_tip = ttk.Label(template_frame, text="Need a template? Download the sample TXT file, fill it, and use it below.")
+        lbl_tip.pack(side=tk.LEFT, padx=5)
+
+        btn_download_template = ttk.Button(template_frame, text="Download Template", command=self.download_template)
+        btn_download_template.pack(side=tk.RIGHT, padx=5)
+
         # 1. File Selection Section
         file_frame = ttk.LabelFrame(main_frame, text=" 1. Select TXT Configuration File ", padding=10)
         file_frame.pack(fill=tk.X, pady=5)
 
-        self.entry_path = ttk.Entry(file_frame, textvariable=self.list_path_var, width=50)
+        self.entry_path = ttk.Entry(file_frame, textvariable=self.list_path_var, width=45)
         self.entry_path.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
         btn_browse = ttk.Button(file_frame, text="Browse...", command=self.browse_file)
@@ -62,22 +73,28 @@ class FileUtilityApp:
 
         # Run Button
         self.btn_run = ttk.Button(main_frame, text="Start Operation", command=self.run_operation)
-        self.btn_run.pack(fill=tk.X, pady=10)
+        self.btn_run.pack(fill=tk.X, pady=8)
 
-        # Log Console Area
+        # Log Console Area & Export Report Button Container
         log_frame = ttk.LabelFrame(main_frame, text=" Live Output & Logs ", padding=5)
         log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        self.log_text = tk.Text(log_frame, wrap=tk.WORD, height=12, bg="#1e1e1e", fg="#d4d4d4", font=("Consolas", 9))
+        self.log_text = tk.Text(log_frame, wrap=tk.WORD, height=10, bg="#1e1e1e", fg="#d4d4d4", font=("Consolas", 9))
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text.config(yscrollcommand=scrollbar.set)
 
+        # Bottom Bar for Report Export
+        bottom_bar = ttk.Frame(main_frame)
+        bottom_bar.pack(fill=tk.X, pady=(5, 0))
+
+        self.btn_export_report = ttk.Button(bottom_bar, text="Download / Export Report (Tab-Delimited)", command=self.export_report, state=tk.DISABLED)
+        self.btn_export_report.pack(side=tk.RIGHT)
+
     def toggle_overwrite_state(self):
         if self.action_choice.get() == 3:
-            # Disable overwrite options for rename in-place
             self.rb_ow_1.config(state=tk.DISABLED)
             self.rb_ow_2.config(state=tk.DISABLED)
             self.rb_ow_3.config(state=tk.DISABLED)
@@ -85,6 +102,26 @@ class FileUtilityApp:
             self.rb_ow_1.config(state=tk.NORMAL)
             self.rb_ow_2.config(state=tk.NORMAL)
             self.rb_ow_3.config(state=tk.NORMAL)
+
+    def download_template(self):
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
+            initialfile="AE_FileUtility_template.txt",
+            title="Save Template File"
+        )
+        if file_path:
+            template_content = (
+                "C:\\Docs\\file.pdf\tD:\\Backup\tReport_2026.pdf\n"
+                "C:\\Images\\photo.jpg\tE:\\Photos\t\n"
+                "D:\\Work\\Data.xlsx\t\tData_V2.xlsx\n"
+            )
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(template_content)
+                messagebox.showinfo("Success", f"Template file successfully saved to:\n{file_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not save template file: {e}")
 
     def browse_file(self):
         filename = filedialog.askopenfilename(title="Select TXT File", filetypes=(("Text Files", "*.txt"), ("All Files", "*.*")))
@@ -96,6 +133,25 @@ class FileUtilityApp:
         self.log_text.see(tk.END)
         self.root.update_idletasks()
 
+    def export_report(self):
+        if not self.last_log_content:
+            messagebox.showwarning("Warning", "No operation logs available to export yet.")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
+            initialfile="AE_FileUtility_report.txt",
+            title="Save Tab-Delimited Report"
+        )
+        if file_path:
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(self.last_log_content)
+                messagebox.showinfo("Success", f"Tab-delimited report successfully saved to:\n{file_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not save report: {e}")
+
     def run_operation(self):
         list_path = self.list_path_var.get().strip()
         if not list_path or not os.path.exists(list_path):
@@ -103,13 +159,20 @@ class FileUtilityApp:
             return
 
         self.log_text.delete("1.0", tk.END)
-        log_file_path = os.path.join(os.path.dirname(list_path), "transfer_log.txt")
-
+        
+        report_rows = []
         action = self.action_choice.get()
         overwrite_mode = self.overwrite_choice.get()
 
-        self.log_message(f"=== Session Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
+        start_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
+        self.log_message("===================================================")
+        self.log_message(f"AE_FileUtility Session Started: {start_time_str}")
+        self.log_message("===================================================")
+        
+        report_rows.append(f"Session Start\t{start_time_str}\t")
+        report_rows.append("Status\tSource File\tDestination / Result")
+
         success_count = 0
         fail_count = 0
 
@@ -131,6 +194,7 @@ class FileUtilityApp:
 
             if not os.path.exists(src_file):
                 self.log_message(f"[NOT FOUND] {src_file}")
+                report_rows.append(f"NOT FOUND\t{src_file}\tFile does not exist on disk")
                 fail_count += 1
                 continue
 
@@ -138,12 +202,12 @@ class FileUtilityApp:
             if action == 3:
                 if not new_name:
                     self.log_message(f"[SKIPPED] No new name provided: {src_file}")
+                    report_rows.append(f"SKIPPED\t{src_file}\tNo new name provided for in-place rename")
                     continue
                 
                 src_folder, old_name = os.path.split(src_file)
                 base_name, old_ext = os.path.splitext(old_name)
                 
-                # Check extension in new name
                 if not os.path.splitext(new_name)[1]:
                     target_name = new_name + old_ext
                 else:
@@ -153,22 +217,27 @@ class FileUtilityApp:
 
                 if os.path.abspath(src_file).lower() == os.path.abspath(target_path).lower():
                     self.log_message(f"[SKIPPED] Name is identical: {src_file}")
+                    report_rows.append(f"SKIPPED\t{src_file}\tNew name is identical to current name")
                 elif os.path.exists(target_path):
                     self.log_message(f"[ERROR] Target already exists: {target_path}")
+                    report_rows.append(f"ERROR\t{src_file}\tTarget already exists: {target_path}")
                     fail_count += 1
                 else:
                     try:
                         os.rename(src_file, target_path)
                         self.log_message(f"[RENAMED] {src_file} -> {target_name}")
+                        report_rows.append(f"RENAMED\t{src_file}\t{target_path}")
                         success_count += 1
                     except Exception as e:
                         self.log_message(f"[ERROR] Failed to rename: {e}")
+                        report_rows.append(f"ERROR\t{src_file}\tFailed to rename: {e}")
                         fail_count += 1
 
             # ACTIONS 1 & 2: COPY OR MOVE
             else:
                 if not dest_folder:
                     self.log_message(f"[ERROR] No destination specified for: {src_file}")
+                    report_rows.append(f"ERROR\t{src_file}\tNo destination folder specified")
                     fail_count += 1
                     continue
 
@@ -177,6 +246,7 @@ class FileUtilityApp:
                         os.makedirs(dest_folder)
                     except Exception as e:
                         self.log_message(f"[ERROR] Could not create folder {dest_folder}: {e}")
+                        report_rows.append(f"ERROR\t{src_file}\tCould not create destination folder: {e}")
                         fail_count += 1
                         continue
 
@@ -189,6 +259,7 @@ class FileUtilityApp:
                 if os.path.exists(target_path):
                     if overwrite_mode == 3: # Skip
                         self.log_message(f"[SKIPPED] Already exists: {target_path}")
+                        report_rows.append(f"SKIPPED\t{src_file}\tTarget already exists (Skipped): {target_path}")
                         should_process = False
                     elif overwrite_mode == 2: # Auto-number
                         base_n, ext_n = os.path.splitext(final_filename)
@@ -206,17 +277,39 @@ class FileUtilityApp:
                         if action == 2: # Move
                             shutil.move(src_file, target_path)
                             self.log_message(f"[MOVED] {src_file} -> {target_path}")
+                            report_rows.append(f"MOVED\t{src_file}\t{target_path}")
                         else: # Copy
                             shutil.copy2(src_file, target_path)
                             self.log_message(f"[COPIED] {src_file} -> {target_path}")
+                            report_rows.append(f"COPIED\t{src_file}\t{target_path}")
                         success_count += 1
                     except Exception as e:
                         self.log_message(f"[ERROR] Operation failed: {e}")
+                        report_rows.append(f"ERROR\t{src_file}\tOperation failed: {e}")
                         fail_count += 1
 
-        self.log_message("\n========================================")
-        self.log_message(f"Operation Complete! Successful: {success_count}, Failed/Skipped: {fail_count}")
-        self.log_message("========================================")
+        end_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        report_rows.append(f"Summary\tSuccessful: {success_count}\tFailed/Skipped: {fail_count}")
+        report_rows.append(f"Session End\t{end_time_str}\t")
+
+        self.log_message("===================================================")
+        self.log_message(f"   Operation Complete!")
+        self.log_message(f"   Successful: {success_count}")
+        self.log_message(f"   Failed / Skipped: {fail_count}")
+        self.log_message("===================================================")
+        self.log_message(f"Session Ended: {end_time_str}")
+
+        self.last_log_content = "\n".join(report_rows)
+        self.btn_export_report.config(state=tk.NORMAL)
+
+        try:
+            auto_log_path = os.path.join(os.path.dirname(list_path), "AE_FileUtility_report.txt")
+            with open(auto_log_path, "w", encoding="utf-8") as f:
+                f.write(self.last_log_content)
+        except Exception:
+            pass
+
         messagebox.showinfo("Done", f"Operation finished!\nSuccessful: {success_count}\nFailed/Skipped: {fail_count}")
 
 if __name__ == "__main__":
