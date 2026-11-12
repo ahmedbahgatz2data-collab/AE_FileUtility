@@ -1,13 +1,17 @@
-name: Build AE_FileUtility Executable
+name: Build and Release AE_FileUtility
 
 on:
   push:
     branches: [ "main", "master" ]
-  workflow_dispatch:
+    paths:
+      - 'app.py'  # يتم تشغيل البناء فقط عند تعديل ملف البايثون
 
 jobs:
   build:
     runs-on: windows-latest
+
+    permissions:
+      contents: write  # صلاحية كتابة ونشر الإصدارات (Releases) تلقائياً
 
     steps:
     - name: Checkout Repository
@@ -18,17 +22,20 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install PyInstaller
+    - name: Install PyInstaller & Requests
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller
+        pip install pyinstaller requests
 
     - name: Build EXE with PyInstaller
       run: |
         pyinstaller --noconsole --onefile --name="AE_FileUtility" app.py
 
-    - name: Upload Executable Artifact
-      uses: actions/upload-artifact@v4
+    - name: Create Release and Upload EXE
+      uses: softprops/action-gh-release@v2
       with:
-        name: AE_FileUtility-Exe
-        path: dist/AE_FileUtility.exe
+        tag_name: v1.0.0
+        name: AE_FileUtility v1.0.0
+        files: dist/AE_FileUtility.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
