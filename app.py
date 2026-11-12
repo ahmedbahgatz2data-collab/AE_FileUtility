@@ -6,20 +6,19 @@ import threading
 import urllib.request
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from datetime import datetime
+from datetime import datetime, timedelta
 
 CONFIG_FILE = "AE_FileUtility_config.json"
-CURRENT_VERSION = "1.0.0"  # قم بتحديث هذا الرقم كلما رفعت إصداراً جديداً
-GITHUB_REPO = "ahmedbahgatz2data-collab/AE_FileUtility"  # تم تحديثه بمستودعك الشخصي
+CURRENT_VERSION = "1.1.0"
+GITHUB_REPO = "ahmedbahgatz2data-collab/AE_FileUtility"
 
 class FileUtilityApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"AE_FileUtility - Ultimate File Manager (v{CURRENT_VERSION})")
-        self.root.geometry("750x700")
-        self.root.minsize(680, 620)
+        self.root.geometry("750x730")
+        self.root.minsize(680, 650)
 
-        # Configure Modern Styles & Palette
         style = ttk.Style()
         style.theme_use("clam")
 
@@ -46,7 +45,8 @@ class FileUtilityApp:
 
         # Variables
         self.list_path_var = tk.StringVar()
-        self.filter_var = tk.StringVar(value="")
+        self.filter_ext_var = tk.StringVar(value="")
+        self.filter_days_var = tk.StringVar(value="")  # فلترة الأيام الأخيرة
         self.action_choice = tk.IntVar(value=1)
         self.overwrite_choice = tk.IntVar(value=1)
         self.last_log_content = ""
@@ -56,7 +56,6 @@ class FileUtilityApp:
         self.create_widgets()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        # فحص التحديثات في الخلفية بصمت تام عند فتح البرنامج
         threading.Thread(target=self.check_silent_updates, daemon=True).start()
 
     def create_widgets(self):
@@ -72,7 +71,8 @@ class FileUtilityApp:
         btn_download_template = ttk.Button(template_frame, text="Download Template", command=self.download_template)
         btn_download_template.pack(side=tk.RIGHT, padx=5)
 
-        file_frame = ttk.LabelFrame(main_frame, text=" 📂 1. Configuration & Filter ", padding=10)
+        # 1. File Selection & Advanced Filters Section
+        file_frame = ttk.LabelFrame(main_frame, text=" 📂 1. Configuration & Smart Filters ", padding=10)
         file_frame.pack(fill=tk.X, pady=(0, 8))
 
         f_top = ttk.Frame(file_frame)
@@ -82,11 +82,17 @@ class FileUtilityApp:
         btn_browse = ttk.Button(f_top, text="Browse...", command=self.browse_file)
         btn_browse.pack(side=tk.RIGHT)
 
+        # Filters Row
         f_bottom = ttk.Frame(file_frame)
-        f_bottom.pack(fill=tk.X, pady=(5, 2))
-        ttk.Label(f_bottom, text="Filter Extension (e.g. .pdf, .jpg - leave blank for all):").pack(side=tk.LEFT, padx=(0, 10))
-        self.entry_filter = ttk.Entry(f_bottom, textvariable=self.filter_var, width=15)
-        self.entry_filter.pack(side=tk.LEFT)
+        f_bottom.pack(fill=tk.X, pady=(8, 2))
+        
+        ttk.Label(f_bottom, text="Ext (e.g. .pdf):").pack(side=tk.LEFT, padx=(0, 5))
+        self.entry_filter_ext = ttk.Entry(f_bottom, textvariable=self.filter_ext_var, width=8)
+        self.entry_filter_ext.pack(side=tk.LEFT, padx=(0, 15))
+
+        ttk.Label(f_bottom, text="Modified within last X days (e.g. 7):").pack(side=tk.LEFT, padx=(0, 5))
+        self.entry_filter_days = ttk.Entry(f_bottom, textvariable=self.filter_days_var, width=6)
+        self.entry_filter_days.pack(side=tk.LEFT)
 
         options_container = ttk.Frame(main_frame)
         options_container.pack(fill=tk.X, pady=(0, 8))
@@ -178,7 +184,8 @@ class FileUtilityApp:
                     data = json.load(f)
                     self.action_choice.set(data.get("action", 1))
                     self.overwrite_choice.set(data.get("overwrite", 1))
-                    self.filter_var.set(data.get("filter", ""))
+                    self.filter_ext_var.set(data.get("filter_ext", ""))
+                    self.filter_days_var.set(data.get("filter_days", ""))
             except Exception:
                 pass
 
@@ -186,7 +193,8 @@ class FileUtilityApp:
         data = {
             "action": self.action_choice.get(),
             "overwrite": self.overwrite_choice.get(),
-            "filter": self.filter_var.get()
+            "filter_ext": self.filter_ext_var.get(),
+            "filter_days": self.filter_days_var.get()
         }
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -299,7 +307,13 @@ class FileUtilityApp:
         report_rows = []
         action = self.action_choice.get()
         overwrite_mode = self.overwrite_choice.get()
-        file_filter = self.filter_var.get().strip().lower()
+        
+        filter_ext = self.filter_ext_var.get().strip().lower()
+        filter_days_str = self.filter_days_var.get().strip()
+        
+        max_days = None
+        if filter_days_str.isdigit():
+            max_days = int(filter_days_str)
 
         try:
             with open(list_path, "r", encoding="utf-8") as f:
@@ -336,16 +350,25 @@ class FileUtilityApp:
             if not src_file:
                 continue
 
-            if file_filter:
-                _, ext = os.path.splitext(src_file)
-                if ext.lower() != file_filter:
-                    continue
-
             if not os.path.exists(src_file):
                 self.log_message(f"[NOT FOUND] {src_file}")
                 report_rows.append(f"NOT FOUND\t{src_file}\tFile does not exist")
                 fail_count += 1
                 continue
+
+            # 1. Extension Filter Check
+            if filter_ext:
+                _, ext = os.path.splitext(src_file)
+                if ext.lower() != filter_ext:
+                    continue
+
+            # 2. Date / Modified Time Filter Check
+            if max_days is not None:
+                file_mtime = datetime.fromtimestamp(os.path.getmtime(src_file))
+                time_threshold = datetime.now() - timedelta(days=max_days)
+                if file_mtime < time_threshold:
+                    # أقدم من الفترة المطلوبة، يتم تخطيه بصمت
+                    continue
 
             if action == 3:
                 if not new_name:
