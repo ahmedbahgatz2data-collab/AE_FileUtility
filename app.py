@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox, ttk
 from datetime import datetime, timedelta
 
 CONFIG_FILE = "AE_FileUtility_config.json"
-CURRENT_VERSION = "1.1.0"
+CURRENT_VERSION = "1.1.0" # Force trigger build update
 GITHUB_REPO = "ahmedbahgatz2data-collab/AE_FileUtility"
 
 class FileUtilityApp:
