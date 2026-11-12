@@ -34,8 +34,8 @@ jobs:
     - name: Create Release and Upload EXE
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: v1.0.0
-        name: AE_FileUtility v1.0.0
+        tag_name: v1.1.0
+        name: AE_FileUtility v1.1.0
         files: dist/AE_FileUtility.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
