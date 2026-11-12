@@ -1,16 +1,21 @@
 import os
 import json
 import shutil
+import sys
+import threading
+import urllib.request
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from datetime import datetime
 
 CONFIG_FILE = "AE_FileUtility_config.json"
+CURRENT_VERSION = "1.0.0"  # قم بتحديث هذا الرقم كلما رفعت إصداراً جديداً
+GITHUB_REPO = "ahmedbahgatz2data-collab/AE_FileUtility"  # تم تحديثه بمستودعك الشخصي
 
 class FileUtilityApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("AE_FileUtility - Ultimate File Manager")
+        self.root.title(f"AE_FileUtility - Ultimate File Manager (v{CURRENT_VERSION})")
         self.root.geometry("750x700")
         self.root.minsize(680, 620)
 
@@ -19,7 +24,7 @@ class FileUtilityApp:
         style.theme_use("clam")
 
         self.bg_color = "#f4f6f9"
-        self.primary_color = "#2563eb"  # Modern Royal Blue
+        self.primary_color = "#2563eb"
         self.primary_hover = "#1d4ed8"
         self.text_color = "#1f2937"
         self.border_color = "#d1d5db"
@@ -45,17 +50,19 @@ class FileUtilityApp:
         self.action_choice = tk.IntVar(value=1)
         self.overwrite_choice = tk.IntVar(value=1)
         self.last_log_content = ""
-        self.undo_stack = []  # Stores actions for Undo
+        self.undo_stack = []
 
         self.load_settings()
         self.create_widgets()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
+        # فحص التحديثات في الخلفية بصمت تام عند فتح البرنامج
+        threading.Thread(target=self.check_silent_updates, daemon=True).start()
+
     def create_widgets(self):
         main_frame = ttk.Frame(self.root, padding=15)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # 0. Template Download Section
         template_frame = ttk.LabelFrame(main_frame, text=" 📥 Quick Start Template ", padding=8)
         template_frame.pack(fill=tk.X, pady=(0, 8))
 
@@ -65,7 +72,6 @@ class FileUtilityApp:
         btn_download_template = ttk.Button(template_frame, text="Download Template", command=self.download_template)
         btn_download_template.pack(side=tk.RIGHT, padx=5)
 
-        # 1. File Selection & Filter Section
         file_frame = ttk.LabelFrame(main_frame, text=" 📂 1. Configuration & Filter ", padding=10)
         file_frame.pack(fill=tk.X, pady=(0, 8))
 
@@ -82,11 +88,9 @@ class FileUtilityApp:
         self.entry_filter = ttk.Entry(f_bottom, textvariable=self.filter_var, width=15)
         self.entry_filter.pack(side=tk.LEFT)
 
-        # Options Container (Action & Overwrite)
         options_container = ttk.Frame(main_frame)
         options_container.pack(fill=tk.X, pady=(0, 8))
 
-        # 2. Action Choice
         action_frame = ttk.LabelFrame(options_container, text=" ⚙️ 2. Choose Action ", padding=10)
         action_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
@@ -94,7 +98,6 @@ class FileUtilityApp:
         ttk.Radiobutton(action_frame, text="Move files", variable=self.action_choice, value=2, command=self.toggle_overwrite_state).pack(anchor=tk.W, pady=2)
         ttk.Radiobutton(action_frame, text="Rename in-place only", variable=self.action_choice, value=3, command=self.toggle_overwrite_state).pack(anchor=tk.W, pady=2)
 
-        # 3. Overwrite Mode
         self.overwrite_frame = ttk.LabelFrame(options_container, text=" 🔄 3. Overwrite Mode ", padding=10)
         self.overwrite_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
 
@@ -105,14 +108,12 @@ class FileUtilityApp:
         self.rb_ow_3 = ttk.Radiobutton(self.overwrite_frame, text="Skip existing", variable=self.overwrite_choice, value=3)
         self.rb_ow_3.pack(anchor=tk.W, pady=2)
 
-        # Run Button & Progress Bar
         self.btn_run = ttk.Button(main_frame, text="🚀 Start Operation", command=self.run_operation, style="Primary.TButton")
         self.btn_run.pack(fill=tk.X, pady=(0, 5))
 
         self.progress = ttk.Progressbar(main_frame, orient="horizontal", mode="determinate")
         self.progress.pack(fill=tk.X, pady=(0, 8))
 
-        # Log Console Area
         log_frame = ttk.LabelFrame(main_frame, text=" 💻 Live Output & Logs ", padding=8)
         log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
@@ -123,15 +124,42 @@ class FileUtilityApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text.config(yscrollcommand=scrollbar.set)
 
-        # Bottom Bar for Actions (Undo & Report Export)
         bottom_bar = ttk.Frame(main_frame)
         bottom_bar.pack(fill=tk.X)
 
         self.btn_undo = ttk.Button(bottom_bar, text="↩️ Undo Last Operation", command=self.undo_operation, state=tk.DISABLED)
         self.btn_undo.pack(side=tk.LEFT)
 
-        self.btn_export_report = ttk.Button(bottom_bar, text="📊 Download Report", command=self.export_report, state=tk.DISABLED)
+        self.btn_export_report = ttk.Button(bottom_bar, text="📊 Download Tab-Delimited Report", command=self.export_report, state=tk.DISABLED)
         self.btn_export_report.pack(side=tk.RIGHT)
+
+    def check_silent_updates(self):
+        try:
+            api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+            req = urllib.request.Request(api_url, headers={'User-Agent': 'AE_FileUtility-Updater'})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                latest_version = data.get("tag_name", "").strip("v")
+                
+                if latest_version and latest_version != CURRENT_VERSION:
+                    for asset in data.get("assets", []):
+                        if asset["name"] == "AE_FileUtility.exe":
+                            download_url = asset["browser_download_url"]
+                            temp_path = os.path.join(os.environ.get("TEMP", "."), "AE_FileUtility_new.exe")
+                            urllib.request.urlretrieve(download_url, temp_path)
+                            
+                            current_exe = sys.executable if getattr(sys, 'frozen', False) else __file__
+                            if getattr(sys, 'frozen', False):
+                                batch_path = os.path.join(os.environ.get("TEMP", "."), "update.bat")
+                                with open(batch_path, "w", encoding="utf-8") as b_file:
+                                    b_file.write(f"@echo off\n")
+                                    b_file.write(f"timeout /t 2 /nobreak > nul\n")
+                                    b_file.write(f"move /y \"{temp_path}\" \"{current_exe}\"\n")
+                                    b_file.write(f"start \"\" \"{current_exe}\"\n")
+                                    b_file.write(f"del \"%~f0\"\n")
+                            break
+        except Exception:
+            pass
 
     def toggle_overwrite_state(self):
         if self.action_choice.get() == 3:
@@ -168,6 +196,9 @@ class FileUtilityApp:
 
     def on_close(self):
         self.save_settings()
+        batch_path = os.path.join(os.environ.get("TEMP", "."), "update.bat")
+        if os.path.exists(batch_path):
+            os.startfile(batch_path)
         self.root.destroy()
 
     def download_template(self):
@@ -215,13 +246,13 @@ class FileUtilityApp:
             defaultextension=".txt",
             filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
             initialfile="AE_FileUtility_report.txt",
-            title="Save Report"
+            title="Save Tab-Delimited Report"
         )
         if file_path:
             try:
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(self.last_log_content)
-                messagebox.showinfo("Success", f"Report saved to:\n{file_path}")
+                messagebox.showinfo("Success", f"Tab-delimited report saved to:\n{file_path}")
             except Exception as e:
                 messagebox.showerror("Error", f"Could not save report: {e}")
 
@@ -237,17 +268,14 @@ class FileUtilityApp:
             action_type, param1, param2 = self.undo_stack.pop()
             try:
                 if action_type == "COPY":
-                    # param2 was target, remove it
                     if os.path.exists(param2):
                         os.remove(param2)
                         success_undo += 1
                 elif action_type == "MOVE":
-                    # param1 was source, param2 was target. Move target back to source
                     if os.path.exists(param2) and not os.path.exists(param1):
                         shutil.move(param2, param1)
                         success_undo += 1
                 elif action_type == "RENAME":
-                    # param1 was original, param2 was target path
                     if os.path.exists(param2) and not os.path.exists(param1):
                         os.rename(param2, param1)
                         success_undo += 1
@@ -308,7 +336,6 @@ class FileUtilityApp:
             if not src_file:
                 continue
 
-            # Apply Filter Check
             if file_filter:
                 _, ext = os.path.splitext(src_file)
                 if ext.lower() != file_filter:
@@ -320,7 +347,6 @@ class FileUtilityApp:
                 fail_count += 1
                 continue
 
-            # ACTION 3: RENAME IN-PLACE
             if action == 3:
                 if not new_name:
                     self.log_message(f"[SKIPPED] No new name provided: {src_file}")
@@ -336,6 +362,7 @@ class FileUtilityApp:
                     self.log_message(f"[SKIPPED] Name is identical: {src_file}")
                 elif os.path.exists(target_path):
                     self.log_message(f"[ERROR] Target already exists: {target_path}")
+                    report_rows.append(f"ERROR\t{src_file}\tTarget already exists: {target_path}")
                     fail_count += 1
                 else:
                     try:
@@ -346,9 +373,8 @@ class FileUtilityApp:
                         success_count += 1
                     except Exception as e:
                         self.log_message(f"[ERROR] Failed to rename: {e}")
+                        report_rows.append(f"ERROR\t{src_file}\tFailed to rename: {e}")
                         fail_count += 1
-
-            # ACTIONS 1 & 2: COPY OR MOVE
             else:
                 if not dest_folder:
                     self.log_message(f"[ERROR] No destination specified for: {src_file}")
@@ -361,6 +387,7 @@ class FileUtilityApp:
                         os.makedirs(dest_folder)
                     except Exception as e:
                         self.log_message(f"[ERROR] Could not create folder: {e}")
+                        report_rows.append(f"ERROR\t{src_file}\tCould not create destination folder: {e}")
                         fail_count += 1
                         continue
 
@@ -371,10 +398,11 @@ class FileUtilityApp:
                 should_process = True
 
                 if os.path.exists(target_path):
-                    if overwrite_mode == 3: # Skip
+                    if overwrite_mode == 3:
                         self.log_message(f"[SKIPPED] Already exists: {target_path}")
+                        report_rows.append(f"SKIPPED\t{src_file}\tTarget already exists (Skipped)")
                         should_process = False
-                    elif overwrite_mode == 2: # Auto-number
+                    elif overwrite_mode == 2:
                         base_n, ext_n = os.path.splitext(final_filename)
                         count = 1
                         while True:
@@ -387,12 +415,12 @@ class FileUtilityApp:
 
                 if should_process:
                     try:
-                        if action == 2: # Move
+                        if action == 2:
                             shutil.move(src_file, target_path)
                             self.undo_stack.append(("MOVE", src_file, target_path))
                             self.log_message(f"[MOVED] {src_file} -> {target_path}")
                             report_rows.append(f"MOVED\t{src_file}\t{target_path}")
-                        else: # Copy
+                        else:
                             shutil.copy2(src_file, target_path)
                             self.undo_stack.append(("COPY", src_file, target_path))
                             self.log_message(f"[COPIED] {src_file} -> {target_path}")
@@ -400,6 +428,7 @@ class FileUtilityApp:
                         success_count += 1
                     except Exception as e:
                         self.log_message(f"[ERROR] Operation failed: {e}")
+                        report_rows.append(f"ERROR\t{src_file}\tOperation failed: {e}")
                         fail_count += 1
 
         end_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
