@@ -18,7 +18,7 @@ except Exception:
 
 CONFIG_FILE = "AE_FileUtility_config.json"
 UNDO_STATE_FILE = "AE_FileUtility_last_undo.json"
-CURRENT_VERSION = "1.3.2"
+CURRENT_VERSION = "1.3.1"
 GITHUB_REPO = "ahmedbahgatz2data-collab/AE_FileUtility"
 
 
