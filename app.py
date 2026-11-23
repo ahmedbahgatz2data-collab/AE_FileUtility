@@ -8,8 +8,17 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from datetime import datetime, timedelta
 
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+    HAS_DND = True
+except Exception:
+    HAS_DND = False
+    TkinterDnD = None
+    DND_FILES = None
+
 CONFIG_FILE = "AE_FileUtility_config.json"
-CURRENT_VERSION = "1.1.0"
+UNDO_STATE_FILE = "AE_FileUtility_last_undo.json"
+CURRENT_VERSION = "1.2.0"
 GITHUB_REPO = "ahmedbahgatz2data-collab/AE_FileUtility"
 
 
@@ -17,8 +26,8 @@ class FileUtilityApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"AE_FileUtility - Ultimate File Manager (v{CURRENT_VERSION})")
-        self.root.geometry("750x730")
-        self.root.minsize(680, 650)
+        self.root.geometry("820x780")
+        self.root.minsize(720, 680)
 
         style = ttk.Style()
         style.theme_use("clam")
@@ -49,51 +58,89 @@ class FileUtilityApp:
         self.list_path_var = tk.StringVar()
         self.filter_ext_var = tk.StringVar(value="")
         self.filter_days_var = tk.StringVar(value="")
+        self.filter_time_mode_var = tk.StringVar(value="within")  # "within" or "older"
+        self.filter_name_var = tk.StringVar(value="")
+        self.filter_max_mb_var = tk.StringVar(value="")
+
         self.action_choice = tk.IntVar(value=1)
         self.overwrite_choice = tk.IntVar(value=1)
         self.last_log_content = ""
         self.undo_stack = []
+        self.is_busy = False
+        self.update_ready = False
 
         self.load_settings()
+        self.load_persisted_undo()
         self.create_widgets()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         threading.Thread(target=self.check_silent_updates, daemon=True).start()
 
     def create_widgets(self):
-        main_frame = ttk.Frame(self.root, padding=15)
+        main_frame = ttk.Frame(self.root, padding=14)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
+        # 0. Template Bar
         template_frame = ttk.LabelFrame(main_frame, text=" 📥 Quick Start Template ", padding=8)
         template_frame.pack(fill=tk.X, pady=(0, 8))
 
-        lbl_tip = ttk.Label(template_frame, text="Download structured TXT template with instructions & examples.")
+        dnd_status = "Drag & Drop Enabled" if HAS_DND else "Browse / Path Input"
+        lbl_tip = ttk.Label(template_frame, text=f"Tab-delimited TXT template ({dnd_status}).")
         lbl_tip.pack(side=tk.LEFT, padx=5)
 
         btn_download_template = ttk.Button(template_frame, text="Download Template", command=self.download_template)
         btn_download_template.pack(side=tk.RIGHT, padx=5)
 
-        file_frame = ttk.LabelFrame(main_frame, text=" 📂 1. Configuration & Smart Filters ", padding=10)
+        # 1. File Selection & Smart Filters
+        file_frame = ttk.LabelFrame(main_frame, text=" 📂 1. TXT List & Smart Filters ", padding=10)
         file_frame.pack(fill=tk.X, pady=(0, 8))
 
         f_top = ttk.Frame(file_frame)
         f_top.pack(fill=tk.X, pady=2)
         self.entry_path = ttk.Entry(f_top, textvariable=self.list_path_var, font=("Segoe UI", 10))
         self.entry_path.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+
+        if HAS_DND and DND_FILES is not None:
+            try:
+                self.entry_path.drop_target_register(DND_FILES)
+                self.entry_path.dnd_bind("<<Drop>>", self.on_drop_file)
+            except Exception:
+                pass
+
         btn_browse = ttk.Button(f_top, text="Browse...", command=self.browse_file)
         btn_browse.pack(side=tk.RIGHT)
 
-        f_bottom = ttk.Frame(file_frame)
-        f_bottom.pack(fill=tk.X, pady=(8, 2))
+        # Filter Row 1: Extension + Time Filter
+        f_row1 = ttk.Frame(file_frame)
+        f_row1.pack(fill=tk.X, pady=(8, 2))
 
-        ttk.Label(f_bottom, text="Ext (e.g. .pdf):").pack(side=tk.LEFT, padx=(0, 5))
-        self.entry_filter_ext = ttk.Entry(f_bottom, textvariable=self.filter_ext_var, width=8)
-        self.entry_filter_ext.pack(side=tk.LEFT, padx=(0, 15))
+        ttk.Label(f_row1, text="Ext:").pack(side=tk.LEFT, padx=(0, 4))
+        self.entry_filter_ext = ttk.Entry(f_row1, textvariable=self.filter_ext_var, width=8)
+        self.entry_filter_ext.pack(side=tk.LEFT, padx=(0, 12))
 
-        ttk.Label(f_bottom, text="Modified within last X days (e.g. 7):").pack(side=tk.LEFT, padx=(0, 5))
-        self.entry_filter_days = ttk.Entry(f_bottom, textvariable=self.filter_days_var, width=6)
-        self.entry_filter_days.pack(side=tk.LEFT)
+        ttk.Label(f_row1, text="Days:").pack(side=tk.LEFT, padx=(0, 4))
+        self.entry_filter_days = ttk.Entry(f_row1, textvariable=self.filter_days_var, width=6)
+        self.entry_filter_days.pack(side=tk.LEFT, padx=(0, 6))
 
+        self.cb_time_mode = ttk.Combobox(
+            f_row1,
+            textvariable=self.filter_time_mode_var,
+            values=["within", "older"],
+            width=8,
+            state="readonly",
+        )
+        self.cb_time_mode.pack(side=tk.LEFT, padx=(0, 12))
+
+        # Filter Row 2: Name Contains + Max Size (MB)
+        ttk.Label(f_row1, text="Name contains:").pack(side=tk.LEFT, padx=(0, 4))
+        self.entry_filter_name = ttk.Entry(f_row1, textvariable=self.filter_name_var, width=14)
+        self.entry_filter_name.pack(side=tk.LEFT, padx=(0, 12))
+
+        ttk.Label(f_row1, text="Max MB:").pack(side=tk.LEFT, padx=(0, 4))
+        self.entry_filter_mb = ttk.Entry(f_row1, textvariable=self.filter_max_mb_var, width=7)
+        self.entry_filter_mb.pack(side=tk.LEFT)
+
+        # 2 & 3. Action & Overwrite Options
         options_container = ttk.Frame(main_frame)
         options_container.pack(fill=tk.X, pady=(0, 8))
 
@@ -114,32 +161,50 @@ class FileUtilityApp:
         self.rb_ow_3 = ttk.Radiobutton(self.overwrite_frame, text="Skip existing", variable=self.overwrite_choice, value=3)
         self.rb_ow_3.pack(anchor=tk.W, pady=2)
 
-        self.btn_run = ttk.Button(main_frame, text="🚀 Start Operation", command=self.run_operation, style="Primary.TButton")
-        self.btn_run.pack(fill=tk.X, pady=(0, 5))
+        # Action Buttons: Preview + Run
+        action_btns = ttk.Frame(main_frame)
+        action_btns.pack(fill=tk.X, pady=(0, 5))
+
+        self.btn_preview = ttk.Button(action_btns, text="🔍 Preview (Dry-Run)", command=self.start_preview_thread)
+        self.btn_preview.pack(side=tk.LEFT, padx=(0, 8), ipadx=6)
+
+        self.btn_run = ttk.Button(action_btns, text="🚀 Start Operation", command=self.start_run_thread, style="Primary.TButton")
+        self.btn_run.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         self.progress = ttk.Progressbar(main_frame, orient="horizontal", mode="determinate")
         self.progress.pack(fill=tk.X, pady=(0, 8))
 
+        # Live Log Area
         log_frame = ttk.LabelFrame(main_frame, text=" 💻 Live Output & Logs ", padding=8)
         log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
-        self.log_text = tk.Text(log_frame, wrap=tk.WORD, height=9, bg="#1e1e1e", fg="#4ec9b0", font=("Consolas", 9), bd=0, highlightthickness=0)
+        self.log_text = tk.Text(log_frame, wrap=tk.WORD, height=10, bg="#1e1e1e", fg="#4ec9b0", font=("Consolas", 9), bd=0, highlightthickness=0)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text.config(yscrollcommand=scrollbar.set)
 
+        # Bottom Bar
         bottom_bar = ttk.Frame(main_frame)
         bottom_bar.pack(fill=tk.X)
 
-        self.btn_undo = ttk.Button(bottom_bar, text="↩️ Undo Last Operation", command=self.undo_operation, state=tk.DISABLED)
+        undo_state = tk.NORMAL if self.undo_stack else tk.DISABLED
+        self.btn_undo = ttk.Button(bottom_bar, text="↩️ Undo Last Operation", command=self.undo_operation, state=undo_state)
         self.btn_undo.pack(side=tk.LEFT)
 
         self.btn_export_report = ttk.Button(bottom_bar, text="📊 Download Tab-Delimited Report", command=self.export_report, state=tk.DISABLED)
         self.btn_export_report.pack(side=tk.RIGHT)
 
         self.toggle_overwrite_state()
+
+    def on_drop_file(self, event):
+        raw = event.data.strip()
+        if raw.startswith("{") and raw.endswith("}"):
+            raw = raw[1:-1]
+        if raw:
+            self.list_path_var.set(raw)
+            self.log_message(f"[DND] Loaded list file: {raw}")
 
     def check_silent_updates(self):
         try:
@@ -207,6 +272,9 @@ class FileUtilityApp:
                         )
                         with open(batch_path, "w", encoding="utf-8") as b_file:
                             b_file.write(bat_script)
+
+                        self.update_ready = True
+                        self.root.after(0, lambda v=latest_tag: self.log_message(f"[UPDATE] {v} downloaded silently; will apply on exit."))
                         break
         except Exception:
             pass
@@ -226,6 +294,9 @@ class FileUtilityApp:
                     self.overwrite_choice.set(data.get("overwrite", 1))
                     self.filter_ext_var.set(data.get("filter_ext", ""))
                     self.filter_days_var.set(data.get("filter_days", ""))
+                    self.filter_time_mode_var.set(data.get("filter_time_mode", "within"))
+                    self.filter_name_var.set(data.get("filter_name", ""))
+                    self.filter_max_mb_var.set(data.get("filter_max_mb", ""))
             except Exception:
                 pass
 
@@ -235,6 +306,9 @@ class FileUtilityApp:
             "overwrite": self.overwrite_choice.get(),
             "filter_ext": self.filter_ext_var.get(),
             "filter_days": self.filter_days_var.get(),
+            "filter_time_mode": self.filter_time_mode_var.get(),
+            "filter_name": self.filter_name_var.get(),
+            "filter_max_mb": self.filter_max_mb_var.get(),
         }
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -242,8 +316,26 @@ class FileUtilityApp:
         except Exception:
             pass
 
+    def load_persisted_undo(self):
+        if os.path.exists(UNDO_STATE_FILE):
+            try:
+                with open(UNDO_STATE_FILE, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                    if isinstance(loaded, list):
+                        self.undo_stack = loaded
+            except Exception:
+                pass
+
+    def save_persisted_undo(self):
+        try:
+            with open(UNDO_STATE_FILE, "w", encoding="utf-8") as f:
+                json.dump(self.undo_stack, f)
+        except Exception:
+            pass
+
     def on_close(self):
         self.save_settings()
+        self.save_persisted_undo()
         batch_path = os.path.join(os.environ.get("TEMP", os.getcwd()), "AE_FileUtility_apply_update.bat")
         try:
             self.root.destroy()
@@ -290,6 +382,85 @@ class FileUtilityApp:
         self.log_text.see(tk.END)
         self.root.update_idletasks()
 
+    def set_busy_state(self, busy):
+        self.is_busy = busy
+        state = tk.DISABLED if busy else tk.NORMAL
+        self.btn_run.config(state=state)
+        self.btn_preview.config(state=state)
+        if not busy:
+            self.btn_undo.config(state=tk.NORMAL if self.undo_stack else tk.DISABLED)
+            self.btn_export_report.config(state=tk.NORMAL if self.last_log_content else tk.DISABLED)
+
+    def get_file_metadata(self, path):
+        try:
+            st = os.stat(path)
+            size_kb = f"{st.st_size / 1024:.1f}"
+            mtime_str = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            return size_kb, mtime_str, st.st_size, datetime.fromtimestamp(st.st_mtime)
+        except Exception:
+            return "0.0", "", 0, None
+
+    def matches_filters(self, src_file, file_size_bytes, file_mtime, filter_ext, max_days, time_mode, name_substr, max_bytes):
+        if filter_ext:
+            _, ext = os.path.splitext(src_file)
+            if ext.lower() != filter_ext:
+                return False, f"Extension mismatch ({ext or 'none'})"
+
+        if name_substr:
+            base = os.path.basename(src_file).lower()
+            if name_substr not in base:
+                return False, f"Name does not contain '{name_substr}'"
+
+        if max_bytes is not None and file_size_bytes > max_bytes:
+            actual_mb = file_size_bytes / (1024 * 1024)
+            return False, f"Size {actual_mb:.2f} MB exceeds max {max_bytes / (1024 * 1024):.2f} MB"
+
+        if max_days is not None and file_mtime is not None:
+            threshold = datetime.now() - timedelta(days=max_days)
+            if time_mode == "within" and file_mtime < threshold:
+                return False, f"Older than {max_days} days"
+            if time_mode == "older" and file_mtime >= threshold:
+                return False, f"Modified within last {max_days} days"
+
+        return True, ""
+
+    def resolve_target(self, src_file, dest_folder, new_name, action, overwrite_mode):
+        if action == 3:
+            if not new_name:
+                return None, "SKIPPED", "No new name provided"
+            src_folder, old_name = os.path.split(src_file)
+            _, old_ext = os.path.splitext(old_name)
+            target_name = new_name if os.path.splitext(new_name)[1] else new_name + old_ext
+            target_path = os.path.join(src_folder, target_name)
+            if os.path.abspath(src_file).lower() == os.path.abspath(target_path).lower():
+                return None, "SKIPPED", "Name is identical"
+            if os.path.exists(target_path):
+                return None, "ERROR", f"Target already exists: {target_path}"
+            return target_path, "OK", target_path
+
+        if not dest_folder:
+            return None, "ERROR", "No destination specified"
+
+        orig_name = os.path.basename(src_file)
+        final_filename = new_name if new_name else orig_name
+        target_path = os.path.join(dest_folder, final_filename)
+
+        if os.path.exists(target_path):
+            if overwrite_mode == 3:
+                return None, "SKIPPED", "Target already exists (Skipped)"
+            if overwrite_mode == 2:
+                base_n, ext_n = os.path.splitext(final_filename)
+                count = 1
+                while True:
+                    test_name = f"{base_n}_{count}{ext_n}"
+                    test_path = os.path.join(dest_folder, test_name)
+                    if not os.path.exists(test_path):
+                        target_path = test_path
+                        break
+                    count += 1
+
+        return target_path, "OK", target_path
+
     def export_report(self):
         if not self.last_log_content:
             messagebox.showwarning("Warning", "No logs to export.")
@@ -335,21 +506,29 @@ class FileUtilityApp:
             except Exception as e:
                 self.log_message(f"[UNDO ERROR] Failed to revert {param2}: {e}")
 
+        self.save_persisted_undo()
         self.log_message(f"Undo Complete! Successfully reverted {success_undo} items.")
         messagebox.showinfo("Undo Finished", f"Successfully reverted {success_undo} actions.")
         self.btn_undo.config(state=tk.DISABLED)
 
-    def run_operation(self):
+    def start_preview_thread(self):
+        if not self.is_busy:
+            threading.Thread(target=self._execute_job, args=(True,), daemon=True).start()
+
+    def start_run_thread(self):
+        if not self.is_busy:
+            threading.Thread(target=self._execute_job, args=(False,), daemon=True).start()
+
+    def _execute_job(self, dry_run):
         list_path = self.list_path_var.get().strip()
         if not list_path or not os.path.exists(list_path):
-            messagebox.showerror("Error", "Please select a valid TXT configuration file first!")
+            self.root.after(0, lambda: messagebox.showerror("Error", "Please select a valid TXT configuration file first!"))
             return
 
         self.save_settings()
-        self.log_text.delete("1.0", tk.END)
-        self.undo_stack.clear()
+        self.root.after(0, lambda: self.set_busy_state(True))
+        self.root.after(0, lambda: self.log_text.delete("1.0", tk.END))
 
-        report_rows = []
         action = self.action_choice.get()
         overwrite_mode = self.overwrite_choice.get()
 
@@ -359,33 +538,52 @@ class FileUtilityApp:
 
         filter_days_str = self.filter_days_var.get().strip()
         max_days = int(filter_days_str) if filter_days_str.isdigit() else None
+        time_mode = self.filter_time_mode_var.get()
+
+        name_substr = self.filter_name_var.get().strip().lower()
+
+        max_mb_str = self.filter_max_mb_var.get().strip()
+        max_bytes = None
+        if max_mb_str:
+            try:
+                max_bytes = float(max_mb_str) * 1024 * 1024
+            except ValueError:
+                max_bytes = None
 
         try:
             with open(list_path, "r", encoding="utf-8") as f:
                 lines = [l.strip() for l in f.readlines() if l.strip() and not l.strip().startswith("#")]
         except Exception as e:
-            messagebox.showerror("Error", f"Could not read file: {e}")
+            self.root.after(0, lambda err=e: messagebox.showerror("Error", f"Could not read file: {err}"))
+            self.root.after(0, lambda: self.set_busy_state(False))
             return
 
         total_lines = len(lines)
         if total_lines == 0:
-            messagebox.showwarning("Warning", "The configuration file is empty!")
+            self.root.after(0, lambda: messagebox.showwarning("Warning", "The configuration file is empty!"))
+            self.root.after(0, lambda: self.set_busy_state(False))
             return
 
-        self.progress["maximum"] = total_lines
-        self.progress["value"] = 0
+        self.root.after(0, lambda: self.progress.configure(maximum=total_lines, value=0))
 
+        mode_label = "DRY-RUN PREVIEW" if dry_run else "LIVE OPERATION"
         start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.log_message(f"AE_FileUtility Session Started: {start_time_str}")
-        report_rows.append(f"Session Start\t{start_time_str}\t")
-        report_rows.append("Status\tSource File\tDestination / Result")
+        self.root.after(0, lambda m=mode_label, t=start_time_str: self.log_message(f"AE_FileUtility [{m}] Started: {t}"))
+
+        report_rows = [
+            f"Mode\t{mode_label}\t{start_time_str}\t\t\t",
+            "Status\tSource File\tDestination / Result\tSize (KB)\tModified Date\tDetails",
+        ]
+
+        if not dry_run:
+            self.undo_stack = []
 
         success_count = 0
         fail_count = 0
+        filtered_count = 0
 
         for idx, line in enumerate(lines, start=1):
-            self.progress["value"] = idx
-            self.root.update_idletasks()
+            self.root.after(0, lambda v=idx: self.progress.configure(value=v))
 
             parts = line.split("\t")
             src_file = parts[0].strip() if len(parts) > 0 else ""
@@ -396,128 +594,101 @@ class FileUtilityApp:
                 continue
 
             if not os.path.exists(src_file):
-                self.log_message(f"[NOT FOUND] {src_file}")
-                report_rows.append(f"NOT FOUND\t{src_file}\tFile does not exist")
+                self.root.after(0, lambda s=src_file: self.log_message(f"[NOT FOUND] {s}"))
+                report_rows.append(f"NOT FOUND\t{src_file}\t\t0.0\t\tFile does not exist")
                 fail_count += 1
                 continue
 
-            if filter_ext:
-                _, ext = os.path.splitext(src_file)
-                if ext.lower() != filter_ext:
-                    continue
+            size_kb, mtime_str, f_bytes, f_mtime = self.get_file_metadata(src_file)
 
-            if max_days is not None:
-                file_mtime = datetime.fromtimestamp(os.path.getmtime(src_file))
-                time_threshold = datetime.now() - timedelta(days=max_days)
-                if file_mtime < time_threshold:
-                    continue
+            passed, reason = self.matches_filters(
+                src_file, f_bytes, f_mtime, filter_ext, max_days, time_mode, name_substr, max_bytes
+            )
+            if not passed:
+                filtered_count += 1
+                report_rows.append(f"FILTERED\t{src_file}\t\t{size_kb}\t{mtime_str}\t{reason}")
+                continue
 
-            if action == 3:
-                if not new_name:
-                    self.log_message(f"[SKIPPED] No new name provided: {src_file}")
-                    report_rows.append(f"SKIPPED\t{src_file}\tNo new name provided")
-                    continue
+            target_path, status_code, detail_or_path = self.resolve_target(
+                src_file, dest_folder, new_name, action, overwrite_mode
+            )
 
-                src_folder, old_name = os.path.split(src_file)
-                _, old_ext = os.path.splitext(old_name)
-                target_name = new_name if os.path.splitext(new_name)[1] else new_name + old_ext
-                target_path = os.path.join(src_folder, target_name)
-
-                if os.path.abspath(src_file).lower() == os.path.abspath(target_path).lower():
-                    self.log_message(f"[SKIPPED] Name is identical: {src_file}")
-                elif os.path.exists(target_path):
-                    self.log_message(f"[ERROR] Target already exists: {target_path}")
-                    report_rows.append(f"ERROR\t{src_file}\tTarget already exists: {target_path}")
+            if status_code != "OK":
+                self.root.after(0, lambda st=status_code, s=src_file, d=detail_or_path: self.log_message(f"[{st}] {s} -> {d}"))
+                report_rows.append(f"{status_code}\t{src_file}\t\t{size_kb}\t{mtime_str}\t{detail_or_path}")
+                if status_code == "ERROR":
                     fail_count += 1
-                else:
-                    try:
-                        os.rename(src_file, target_path)
-                        self.undo_stack.append(("RENAME", src_file, target_path))
-                        self.log_message(f"[RENAMED] {src_file} -> {target_name}")
-                        report_rows.append(f"RENAMED\t{src_file}\t{target_path}")
-                        success_count += 1
-                    except Exception as e:
-                        self.log_message(f"[ERROR] Failed to rename: {e}")
-                        report_rows.append(f"ERROR\t{src_file}\tFailed to rename: {e}")
-                        fail_count += 1
-            else:
-                if not dest_folder:
-                    self.log_message(f"[ERROR] No destination specified for: {src_file}")
-                    report_rows.append(f"ERROR\t{src_file}\tNo destination specified")
-                    fail_count += 1
-                    continue
+                continue
 
-                if not os.path.exists(dest_folder):
-                    try:
+            planned_verb = "RENAME" if action == 3 else ("MOVE" if action == 2 else "COPY")
+
+            if dry_run:
+                self.root.after(
+                    0,
+                    lambda pv=planned_verb, s=src_file, t=target_path: self.log_message(f"[PREVIEW {pv}] {s} -> {t}"),
+                )
+                report_rows.append(f"PREVIEW_{planned_verb}\t{src_file}\t{target_path}\t{size_kb}\t{mtime_str}\tDry-run only")
+                success_count += 1
+                continue
+
+            try:
+                if action == 3:
+                    os.rename(src_file, target_path)
+                    self.undo_stack.append(("RENAME", src_file, target_path))
+                    self.root.after(0, lambda s=src_file, t=target_path: self.log_message(f"[RENAMED] {s} -> {t}"))
+                    report_rows.append(f"RENAMED\t{src_file}\t{target_path}\t{size_kb}\t{mtime_str}\tRenamed in-place")
+                elif action == 2:
+                    if dest_folder and not os.path.exists(dest_folder):
                         os.makedirs(dest_folder)
-                    except Exception as e:
-                        self.log_message(f"[ERROR] Could not create folder: {e}")
-                        report_rows.append(f"ERROR\t{src_file}\tCould not create destination folder: {e}")
-                        fail_count += 1
-                        continue
+                    shutil.move(src_file, target_path)
+                    self.undo_stack.append(("MOVE", src_file, target_path))
+                    self.root.after(0, lambda s=src_file, t=target_path: self.log_message(f"[MOVED] {s} -> {t}"))
+                    report_rows.append(f"MOVED\t{src_file}\t{target_path}\t{size_kb}\t{mtime_str}\tMoved")
+                else:
+                    if dest_folder and not os.path.exists(dest_folder):
+                        os.makedirs(dest_folder)
+                    shutil.copy2(src_file, target_path)
+                    self.undo_stack.append(("COPY", src_file, target_path))
+                    self.root.after(0, lambda s=src_file, t=target_path: self.log_message(f"[COPIED] {s} -> {t}"))
+                    report_rows.append(f"COPIED\t{src_file}\t{target_path}\t{size_kb}\t{mtime_str}\tCopied")
+                success_count += 1
+            except Exception as e:
+                self.root.after(0, lambda s=src_file, err=e: self.log_message(f"[ERROR] {s}: {err}"))
+                report_rows.append(f"ERROR\t{src_file}\t{target_path}\t{size_kb}\t{mtime_str}\t{e}")
+                fail_count += 1
 
-                orig_name = os.path.basename(src_file)
-                final_filename = new_name if new_name else orig_name
-                target_path = os.path.join(dest_folder, final_filename)
-
-                should_process = True
-
-                if os.path.exists(target_path):
-                    if overwrite_mode == 3:
-                        self.log_message(f"[SKIPPED] Already exists: {target_path}")
-                        report_rows.append(f"SKIPPED\t{src_file}\tTarget already exists (Skipped)")
-                        should_process = False
-                    elif overwrite_mode == 2:
-                        base_n, ext_n = os.path.splitext(final_filename)
-                        count = 1
-                        while True:
-                            test_name = f"{base_n}_{count}{ext_n}"
-                            test_path = os.path.join(dest_folder, test_name)
-                            if not os.path.exists(test_path):
-                                target_path = test_path
-                                break
-                            count += 1
-
-                if should_process:
-                    try:
-                        if action == 2:
-                            shutil.move(src_file, target_path)
-                            self.undo_stack.append(("MOVE", src_file, target_path))
-                            self.log_message(f"[MOVED] {src_file} -> {target_path}")
-                            report_rows.append(f"MOVED\t{src_file}\t{target_path}")
-                        else:
-                            shutil.copy2(src_file, target_path)
-                            self.undo_stack.append(("COPY", src_file, target_path))
-                            self.log_message(f"[COPIED] {src_file} -> {target_path}")
-                            report_rows.append(f"COPIED\t{src_file}\t{target_path}")
-                        success_count += 1
-                    except Exception as e:
-                        self.log_message(f"[ERROR] Operation failed: {e}")
-                        report_rows.append(f"ERROR\t{src_file}\tOperation failed: {e}")
-                        fail_count += 1
+        if not dry_run:
+            self.save_persisted_undo()
 
         end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        report_rows.append(f"Summary\tSuccessful: {success_count}\tFailed/Skipped: {fail_count}")
-        report_rows.append(f"Session End\t{end_time_str}\t")
+        report_rows.append(f"Summary\tMatched/Done: {success_count}\tFailed: {fail_count}\tFiltered: {filtered_count}\t{end_time_str}\t")
 
-        self.log_message(f"\nOperation Complete! Successful: {success_count}, Failed/Skipped: {fail_count}")
+        summary_msg = f"\n{mode_label} Complete! Matched/Done: {success_count}, Failed: {fail_count}, Filtered: {filtered_count}"
+        self.root.after(0, lambda msg=summary_msg: self.log_message(msg))
 
         self.last_log_content = "\n".join(report_rows)
-        self.btn_export_report.config(state=tk.NORMAL)
-        if self.undo_stack:
-            self.btn_undo.config(state=tk.NORMAL)
 
-        try:
-            auto_log_path = os.path.join(os.path.dirname(list_path), "AE_FileUtility_report.txt")
-            with open(auto_log_path, "w", encoding="utf-8") as f:
-                f.write(self.last_log_content)
-        except Exception:
-            pass
+        if not dry_run:
+            try:
+                auto_log_path = os.path.join(os.path.dirname(list_path), "AE_FileUtility_report.txt")
+                with open(auto_log_path, "w", encoding="utf-8") as f:
+                    f.write(self.last_log_content)
+            except Exception:
+                pass
 
-        messagebox.showinfo("Done", f"Operation finished!\nSuccessful: {success_count}\nFailed/Skipped: {fail_count}")
+        self.root.after(0, lambda: self.set_busy_state(False))
+        self.root.after(
+            0,
+            lambda m=mode_label, ok=success_count, fl=fail_count, ft=filtered_count: messagebox.showinfo(
+                "Done", f"{m} finished!\nMatched/Done: {ok}\nFailed: {fl}\nFiltered: {ft}"
+            ),
+        )
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
+    if HAS_DND and TkinterDnD is not None:
+        root = TkinterDnD.Tk()
+    else:
+        root = tk.Tk()
     app = FileUtilityApp(root)
     root.mainloop()
