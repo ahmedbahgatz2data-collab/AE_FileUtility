@@ -18,7 +18,7 @@ except Exception:
 
 CONFIG_FILE = "AE_FileUtility_config.json"
 UNDO_STATE_FILE = "AE_FileUtility_last_undo.json"
-CURRENT_VERSION = "1.2.0"
+CURRENT_VERSION = "1.3.0"
 GITHUB_REPO = "ahmedbahgatz2data-collab/AE_FileUtility"
 
 
@@ -26,8 +26,8 @@ class FileUtilityApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"AE_FileUtility - Ultimate File Manager (v{CURRENT_VERSION})")
-        self.root.geometry("820x780")
-        self.root.minsize(720, 680)
+        self.root.geometry("830x790")
+        self.root.minsize(730, 690)
 
         style = ttk.Style()
         style.theme_use("clam")
@@ -58,7 +58,7 @@ class FileUtilityApp:
         self.list_path_var = tk.StringVar()
         self.filter_ext_var = tk.StringVar(value="")
         self.filter_days_var = tk.StringVar(value="")
-        self.filter_time_mode_var = tk.StringVar(value="within")  # "within" or "older"
+        self.filter_time_mode_var = tk.StringVar(value="within")
         self.filter_name_var = tk.StringVar(value="")
         self.filter_max_mb_var = tk.StringVar(value="")
 
@@ -72,24 +72,29 @@ class FileUtilityApp:
         self.load_settings()
         self.load_persisted_undo()
         self.create_widgets()
+        self.bind_drag_and_drop()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        threading.Thread(target=self.check_silent_updates, daemon=True).start()
+        # Silent background update check on startup
+        threading.Thread(target=self.check_updates_worker, args=(False,), daemon=True).start()
 
     def create_widgets(self):
         main_frame = ttk.Frame(self.root, padding=14)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # 0. Template Bar
-        template_frame = ttk.LabelFrame(main_frame, text=" 📥 Quick Start Template ", padding=8)
-        template_frame.pack(fill=tk.X, pady=(0, 8))
+        # 0. Top Bar: Template + Check for Updates
+        top_bar = ttk.LabelFrame(main_frame, text=" 📥 Quick Start & Updates ", padding=8)
+        top_bar.pack(fill=tk.X, pady=(0, 8))
 
-        dnd_status = "Drag & Drop Enabled" if HAS_DND else "Browse / Path Input"
-        lbl_tip = ttk.Label(template_frame, text=f"Tab-delimited TXT template ({dnd_status}).")
+        dnd_status = "Drag & Drop Active" if HAS_DND else "Browse / Path Input"
+        lbl_tip = ttk.Label(top_bar, text=f"Tab-delimited TXT template ({dnd_status}).")
         lbl_tip.pack(side=tk.LEFT, padx=5)
 
-        btn_download_template = ttk.Button(template_frame, text="Download Template", command=self.download_template)
-        btn_download_template.pack(side=tk.RIGHT, padx=5)
+        self.btn_check_update = ttk.Button(top_bar, text="🔄 Check for Updates", command=self.manual_check_updates)
+        self.btn_check_update.pack(side=tk.RIGHT, padx=(4, 0))
+
+        btn_download_template = ttk.Button(top_bar, text="Download Template", command=self.download_template)
+        btn_download_template.pack(side=tk.RIGHT, padx=4)
 
         # 1. File Selection & Smart Filters
         file_frame = ttk.LabelFrame(main_frame, text=" 📂 1. TXT List & Smart Filters ", padding=10)
@@ -100,17 +105,9 @@ class FileUtilityApp:
         self.entry_path = ttk.Entry(f_top, textvariable=self.list_path_var, font=("Segoe UI", 10))
         self.entry_path.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
 
-        if HAS_DND and DND_FILES is not None:
-            try:
-                self.entry_path.drop_target_register(DND_FILES)
-                self.entry_path.dnd_bind("<<Drop>>", self.on_drop_file)
-            except Exception:
-                pass
-
         btn_browse = ttk.Button(f_top, text="Browse...", command=self.browse_file)
         btn_browse.pack(side=tk.RIGHT)
 
-        # Filter Row 1: Extension + Time Filter
         f_row1 = ttk.Frame(file_frame)
         f_row1.pack(fill=tk.X, pady=(8, 2))
 
@@ -131,7 +128,6 @@ class FileUtilityApp:
         )
         self.cb_time_mode.pack(side=tk.LEFT, padx=(0, 12))
 
-        # Filter Row 2: Name Contains + Max Size (MB)
         ttk.Label(f_row1, text="Name contains:").pack(side=tk.LEFT, padx=(0, 4))
         self.entry_filter_name = ttk.Entry(f_row1, textvariable=self.filter_name_var, width=14)
         self.entry_filter_name.pack(side=tk.LEFT, padx=(0, 12))
@@ -198,15 +194,85 @@ class FileUtilityApp:
 
         self.toggle_overwrite_state()
 
-    def on_drop_file(self, event):
-        raw = event.data.strip()
-        if raw.startswith("{") and raw.endswith("}"):
-            raw = raw[1:-1]
-        if raw:
-            self.list_path_var.set(raw)
-            self.log_message(f"[DND] Loaded list file: {raw}")
+    def bind_drag_and_drop(self):
+        if not HAS_DND or DND_FILES is None:
+            return
+        for widget in (self.root, self.entry_path):
+            try:
+                widget.drop_target_register(DND_FILES)
+                widget.dnd_bind("<<Drop>>", self.on_drop_items)
+            except Exception:
+                pass
 
-    def check_silent_updates(self):
+    def _parse_dropped_paths(self, data_str):
+        paths = []
+        current = []
+        in_braces = False
+        for ch in data_str:
+            if ch == "{":
+                in_braces = True
+                current = []
+            elif ch == "}":
+                in_braces = False
+                val = "".join(current).strip()
+                if val:
+                    paths.append(val)
+                current = []
+            elif ch == " " and not in_braces:
+                val = "".join(current).strip()
+                if val:
+                    paths.append(val)
+                current = []
+            else:
+                current.append(ch)
+        tail = "".join(current).strip()
+        if tail:
+            paths.append(tail)
+        return paths
+
+    def on_drop_items(self, event):
+        paths = self._parse_dropped_paths(event.data or "")
+        if not paths:
+            return
+
+        # If a single .txt file is dropped, use it directly as the list file
+        if len(paths) == 1 and paths[0].lower().endswith(".txt") and os.path.isfile(paths[0]):
+            self.list_path_var.set(paths[0])
+            self.log_message(f"[DND] Loaded TXT list: {paths[0]}")
+            return
+
+        # Otherwise collect files from dropped files/folders into a generated TXT list
+        collected_files = []
+        for p in paths:
+            if os.path.isfile(p):
+                collected_files.append(p)
+            elif os.path.isdir(p):
+                for root_dir, _, files in os.walk(p):
+                    for fn in files:
+                        collected_files.append(os.path.join(root_dir, fn))
+
+        if not collected_files:
+            self.log_message("[DND] No files found in dropped items.")
+            return
+
+        temp_dir = os.environ.get("TEMP", os.getcwd())
+        generated_list = os.path.join(temp_dir, "AE_FileUtility_dnd_list.txt")
+        try:
+            with open(generated_list, "w", encoding="utf-8") as f:
+                f.write("# Auto-generated from Drag & Drop\n")
+                for fp in collected_files:
+                    f.write(f"{fp}\t\t\n")
+            self.list_path_var.set(generated_list)
+            self.log_message(f"[DND] Generated list with {len(collected_files)} files -> {generated_list}")
+        except Exception as e:
+            self.log_message(f"[DND ERROR] Could not create list: {e}")
+
+    def manual_check_updates(self):
+        self.btn_check_update.config(state=tk.DISABLED)
+        self.log_message("[UPDATE] Checking GitHub releases...")
+        threading.Thread(target=self.check_updates_worker, args=(True,), daemon=True).start()
+
+    def check_updates_worker(self, verbose=False):
         try:
             api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
             req = urllib.request.Request(
@@ -222,13 +288,20 @@ class FileUtilityApp:
                 latest_version = latest_tag.lstrip("vV")
 
                 if not latest_version or latest_version == CURRENT_VERSION.lstrip("vV"):
+                    if verbose:
+                        self.root.after(0, lambda: self.log_message(f"[UPDATE] Already on latest version (v{CURRENT_VERSION})."))
+                        self.root.after(0, lambda: messagebox.showinfo("Updates", f"You are already using the latest version (v{CURRENT_VERSION})."))
                     return
 
                 if not getattr(sys, "frozen", False):
+                    if verbose:
+                        self.root.after(0, lambda v=latest_tag: self.log_message(f"[UPDATE] Newer release available: {v} (running from source)."))
                     return
 
+                asset_found = False
                 for asset in data.get("assets", []):
                     if asset.get("name") == "AE_FileUtility.exe":
+                        asset_found = True
                         download_url = asset.get("browser_download_url")
                         if not download_url:
                             break
@@ -275,9 +348,23 @@ class FileUtilityApp:
 
                         self.update_ready = True
                         self.root.after(0, lambda v=latest_tag: self.log_message(f"[UPDATE] {v} downloaded silently; will apply on exit."))
+                        if verbose:
+                            self.root.after(
+                                0,
+                                lambda v=latest_tag: messagebox.showinfo(
+                                    "Update Ready", f"Version {v} has been downloaded and will apply automatically when you close the app."
+                                ),
+                            )
                         break
-        except Exception:
-            pass
+
+                if not asset_found and verbose:
+                    self.root.after(0, lambda v=latest_tag: self.log_message(f"[UPDATE] Release {v} found, but AE_FileUtility.exe asset was not attached."))
+        except Exception as e:
+            if verbose:
+                self.root.after(0, lambda err=e: self.log_message(f"[UPDATE] Check failed: {err}"))
+        finally:
+            if verbose:
+                self.root.after(0, lambda: self.btn_check_update.config(state=tk.NORMAL))
 
     def toggle_overwrite_state(self):
         state = tk.DISABLED if self.action_choice.get() == 3 else tk.NORMAL
@@ -387,6 +474,7 @@ class FileUtilityApp:
         state = tk.DISABLED if busy else tk.NORMAL
         self.btn_run.config(state=state)
         self.btn_preview.config(state=state)
+        self.btn_check_update.config(state=state)
         if not busy:
             self.btn_undo.config(state=tk.NORMAL if self.undo_stack else tk.DISABLED)
             self.btn_export_report.config(state=tk.NORMAL if self.last_log_content else tk.DISABLED)
