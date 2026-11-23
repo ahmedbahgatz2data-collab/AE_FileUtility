@@ -48,7 +48,7 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --noconsole --onefile --collect-all tkinterdnd2 --name="AE_FileUtility" app.py
+          pyinstaller --noconsole --onefile --collect-all tkinterdnd2 --icon=icon.ico --name="AE_FileUtility" app.py
 
       - name: Create or Update Release and Upload EXE
         uses: softprops/action-gh-release@v2
