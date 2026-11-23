@@ -46,7 +46,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller tkinterdnd2 pillow
 
-      - name: Ensure Valid ICO Format
+      - name: Ensure Multi-Size ICO Format
         shell: python
         run: |
           import os
@@ -56,12 +56,15 @@ jobs:
           if os.path.exists(icon_path):
               try:
                   with Image.open(icon_path) as img:
-                      if img.format != "ICO":
-                          rgba = img.convert("RGBA")
-                          rgba.save(icon_path, format="ICO", sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)])
-                          print("Converted icon.ico to valid ICO format.")
+                      rgba = img.convert("RGBA")
+                      rgba.save(
+                          icon_path,
+                          format="ICO",
+                          sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)],
+                      )
+                      print("Saved multi-size icon.ico successfully.")
               except Exception as e:
-                  print(f"Icon conversion skipped: {e}")
+                  print(f"Icon processing warning: {e}")
 
       - name: Build EXE with PyInstaller
         run: |
