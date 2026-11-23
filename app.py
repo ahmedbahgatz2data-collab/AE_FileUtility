@@ -9,8 +9,9 @@ from tkinter import filedialog, messagebox, ttk
 from datetime import datetime, timedelta
 
 CONFIG_FILE = "AE_FileUtility_config.json"
-CURRENT_VERSION = "1.1.0" # Force trigger build update
+CURRENT_VERSION = "1.1.0"
 GITHUB_REPO = "ahmedbahgatz2data-collab/AE_FileUtility"
+
 
 class FileUtilityApp:
     def __init__(self, root):
@@ -34,19 +35,20 @@ class FileUtilityApp:
         style.configure("TLabel", background=self.bg_color, foreground=self.text_color)
         style.configure("TLabelframe", background=self.bg_color, bordercolor=self.border_color, borderwidth=1)
         style.configure("TLabelframe.Label", font=("Segoe UI", 10, "bold"), background=self.bg_color, foreground=self.primary_color)
-        
+
         style.configure("TButton", font=("Segoe UI", 10), padding=6, relief="flat", background="#e5e7eb")
         style.map("TButton", background=[("active", "#d1d5db"), ("pressed", "#9ca3af")])
 
         style.configure("Primary.TButton", font=("Segoe UI", 11, "bold"), background=self.primary_color, foreground="#ffffff", padding=8)
-        style.map("Primary.TButton", 
-                  background=[("active", self.primary_hover), ("pressed", "#1e40af")],
-                  foreground=[("active", "#ffffff"), ("pressed", "#ffffff")])
+        style.map(
+            "Primary.TButton",
+            background=[("active", self.primary_hover), ("pressed", "#1e40af")],
+            foreground=[("active", "#ffffff"), ("pressed", "#ffffff")],
+        )
 
-        # Variables
         self.list_path_var = tk.StringVar()
         self.filter_ext_var = tk.StringVar(value="")
-        self.filter_days_var = tk.StringVar(value="")  # فلترة الأيام الأخيرة
+        self.filter_days_var = tk.StringVar(value="")
         self.action_choice = tk.IntVar(value=1)
         self.overwrite_choice = tk.IntVar(value=1)
         self.last_log_content = ""
@@ -71,7 +73,6 @@ class FileUtilityApp:
         btn_download_template = ttk.Button(template_frame, text="Download Template", command=self.download_template)
         btn_download_template.pack(side=tk.RIGHT, padx=5)
 
-        # 1. File Selection & Advanced Filters Section
         file_frame = ttk.LabelFrame(main_frame, text=" 📂 1. Configuration & Smart Filters ", padding=10)
         file_frame.pack(fill=tk.X, pady=(0, 8))
 
@@ -82,10 +83,9 @@ class FileUtilityApp:
         btn_browse = ttk.Button(f_top, text="Browse...", command=self.browse_file)
         btn_browse.pack(side=tk.RIGHT)
 
-        # Filters Row
         f_bottom = ttk.Frame(file_frame)
         f_bottom.pack(fill=tk.X, pady=(8, 2))
-        
+
         ttk.Label(f_bottom, text="Ext (e.g. .pdf):").pack(side=tk.LEFT, padx=(0, 5))
         self.entry_filter_ext = ttk.Entry(f_bottom, textvariable=self.filter_ext_var, width=8)
         self.entry_filter_ext.pack(side=tk.LEFT, padx=(0, 15))
@@ -139,43 +139,83 @@ class FileUtilityApp:
         self.btn_export_report = ttk.Button(bottom_bar, text="📊 Download Tab-Delimited Report", command=self.export_report, state=tk.DISABLED)
         self.btn_export_report.pack(side=tk.RIGHT)
 
+        self.toggle_overwrite_state()
+
     def check_silent_updates(self):
         try:
             api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-            req = urllib.request.Request(api_url, headers={'User-Agent': 'AE_FileUtility-Updater'})
-            with urllib.request.urlopen(req, timeout=5) as response:
-                data = json.loads(response.read().decode())
-                latest_version = data.get("tag_name", "").strip("v")
-                
-                if latest_version and latest_version != CURRENT_VERSION:
-                    for asset in data.get("assets", []):
-                        if asset["name"] == "AE_FileUtility.exe":
-                            download_url = asset["browser_download_url"]
-                            temp_path = os.path.join(os.environ.get("TEMP", "."), "AE_FileUtility_new.exe")
-                            urllib.request.urlretrieve(download_url, temp_path)
-                            
-                            current_exe = sys.executable if getattr(sys, 'frozen', False) else __file__
-                            if getattr(sys, 'frozen', False):
-                                batch_path = os.path.join(os.environ.get("TEMP", "."), "update.bat")
-                                with open(batch_path, "w", encoding="utf-8") as b_file:
-                                    b_file.write(f"@echo off\n")
-                                    b_file.write(f"timeout /t 2 /nobreak > nul\n")
-                                    b_file.write(f"move /y \"{temp_path}\" \"{current_exe}\"\n")
-                                    b_file.write(f"start \"\" \"{current_exe}\"\n")
-                                    b_file.write(f"del \"%~f0\"\n")
+            req = urllib.request.Request(
+                api_url,
+                headers={
+                    "User-Agent": "AE_FileUtility-Updater",
+                    "Accept": "application/vnd.github+json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=8) as response:
+                data = json.loads(response.read().decode("utf-8"))
+                latest_tag = str(data.get("tag_name", "")).strip()
+                latest_version = latest_tag.lstrip("vV")
+
+                if not latest_version or latest_version == CURRENT_VERSION.lstrip("vV"):
+                    return
+
+                if not getattr(sys, "frozen", False):
+                    return
+
+                for asset in data.get("assets", []):
+                    if asset.get("name") == "AE_FileUtility.exe":
+                        download_url = asset.get("browser_download_url")
+                        if not download_url:
                             break
+
+                        temp_dir = os.environ.get("TEMP", os.getcwd())
+                        temp_exe = os.path.join(temp_dir, "AE_FileUtility_update_new.exe")
+                        batch_path = os.path.join(temp_dir, "AE_FileUtility_apply_update.bat")
+                        current_exe = sys.executable
+                        current_pid = os.getpid()
+
+                        dl_req = urllib.request.Request(
+                            download_url,
+                            headers={"User-Agent": "AE_FileUtility-Updater"},
+                        )
+                        with urllib.request.urlopen(dl_req, timeout=30) as dl_resp, open(temp_exe, "wb") as out_f:
+                            shutil.copyfileobj(dl_resp, out_f)
+
+                        if not os.path.exists(temp_exe) or os.path.getsize(temp_exe) == 0:
+                            break
+
+                        bat_script = (
+                            "@echo off\n"
+                            "setlocal\n"
+                            f"set \"PID={current_pid}\"\n"
+                            f"set \"NEW_EXE={temp_exe}\"\n"
+                            f"set \"TARGET_EXE={current_exe}\"\n"
+                            ":wait_loop\n"
+                            "tasklist /FI \"PID eq %PID%\" 2>nul | find \"%PID%\" >nul\n"
+                            "if not errorlevel 1 (\n"
+                            "    timeout /t 1 /nobreak >nul\n"
+                            "    goto wait_loop\n"
+                            ")\n"
+                            "timeout /t 1 /nobreak >nul\n"
+                            "move /y \"%NEW_EXE%\" \"%TARGET_EXE%\" >nul 2>&1\n"
+                            "if errorlevel 1 (\n"
+                            "    copy /y \"%NEW_EXE%\" \"%TARGET_EXE%\" >nul 2>&1\n"
+                            "    del /f /q \"%NEW_EXE%\" >nul 2>&1\n"
+                            ")\n"
+                            "start \"\" \"%TARGET_EXE%\"\n"
+                            "del /f /q \"%~f0\" >nul 2>&1\n"
+                        )
+                        with open(batch_path, "w", encoding="utf-8") as b_file:
+                            b_file.write(bat_script)
+                        break
         except Exception:
             pass
 
     def toggle_overwrite_state(self):
-        if self.action_choice.get() == 3:
-            self.rb_ow_1.config(state=tk.DISABLED)
-            self.rb_ow_2.config(state=tk.DISABLED)
-            self.rb_ow_3.config(state=tk.DISABLED)
-        else:
-            self.rb_ow_1.config(state=tk.NORMAL)
-            self.rb_ow_2.config(state=tk.NORMAL)
-            self.rb_ow_3.config(state=tk.NORMAL)
+        state = tk.DISABLED if self.action_choice.get() == 3 else tk.NORMAL
+        self.rb_ow_1.config(state=state)
+        self.rb_ow_2.config(state=state)
+        self.rb_ow_3.config(state=state)
 
     def load_settings(self):
         if os.path.exists(CONFIG_FILE):
@@ -194,7 +234,7 @@ class FileUtilityApp:
             "action": self.action_choice.get(),
             "overwrite": self.overwrite_choice.get(),
             "filter_ext": self.filter_ext_var.get(),
-            "filter_days": self.filter_days_var.get()
+            "filter_days": self.filter_days_var.get(),
         }
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -204,17 +244,22 @@ class FileUtilityApp:
 
     def on_close(self):
         self.save_settings()
-        batch_path = os.path.join(os.environ.get("TEMP", "."), "update.bat")
-        if os.path.exists(batch_path):
-            os.startfile(batch_path)
-        self.root.destroy()
+        batch_path = os.path.join(os.environ.get("TEMP", os.getcwd()), "AE_FileUtility_apply_update.bat")
+        try:
+            self.root.destroy()
+        finally:
+            if os.path.exists(batch_path):
+                try:
+                    os.startfile(batch_path)
+                except Exception:
+                    pass
 
     def download_template(self):
         file_path = filedialog.asksaveasfilename(
             defaultextension=".txt",
             filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
             initialfile="AE_FileUtility_template.txt",
-            title="Save Template File"
+            title="Save Template File",
         )
         if file_path:
             template_content = (
@@ -254,7 +299,7 @@ class FileUtilityApp:
             defaultextension=".txt",
             filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
             initialfile="AE_FileUtility_report.txt",
-            title="Save Tab-Delimited Report"
+            title="Save Tab-Delimited Report",
         )
         if file_path:
             try:
@@ -271,7 +316,7 @@ class FileUtilityApp:
 
         success_undo = 0
         self.log_message("\n--- STARTING UNDO PROCESS ---")
-        
+
         while self.undo_stack:
             action_type, param1, param2 = self.undo_stack.pop()
             try:
@@ -303,17 +348,17 @@ class FileUtilityApp:
         self.save_settings()
         self.log_text.delete("1.0", tk.END)
         self.undo_stack.clear()
-        
+
         report_rows = []
         action = self.action_choice.get()
         overwrite_mode = self.overwrite_choice.get()
-        
+
         filter_ext = self.filter_ext_var.get().strip().lower()
+        if filter_ext and not filter_ext.startswith("."):
+            filter_ext = "." + filter_ext
+
         filter_days_str = self.filter_days_var.get().strip()
-        
-        max_days = None
-        if filter_days_str.isdigit():
-            max_days = int(filter_days_str)
+        max_days = int(filter_days_str) if filter_days_str.isdigit() else None
 
         try:
             with open(list_path, "r", encoding="utf-8") as f:
@@ -330,7 +375,7 @@ class FileUtilityApp:
         self.progress["maximum"] = total_lines
         self.progress["value"] = 0
 
-        start_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.log_message(f"AE_FileUtility Session Started: {start_time_str}")
         report_rows.append(f"Session Start\t{start_time_str}\t")
         report_rows.append("Status\tSource File\tDestination / Result")
@@ -356,18 +401,15 @@ class FileUtilityApp:
                 fail_count += 1
                 continue
 
-            # 1. Extension Filter Check
             if filter_ext:
                 _, ext = os.path.splitext(src_file)
                 if ext.lower() != filter_ext:
                     continue
 
-            # 2. Date / Modified Time Filter Check
             if max_days is not None:
                 file_mtime = datetime.fromtimestamp(os.path.getmtime(src_file))
                 time_threshold = datetime.now() - timedelta(days=max_days)
                 if file_mtime < time_threshold:
-                    # أقدم من الفترة المطلوبة، يتم تخطيه بصمت
                     continue
 
             if action == 3:
@@ -375,7 +417,7 @@ class FileUtilityApp:
                     self.log_message(f"[SKIPPED] No new name provided: {src_file}")
                     report_rows.append(f"SKIPPED\t{src_file}\tNo new name provided")
                     continue
-                
+
                 src_folder, old_name = os.path.split(src_file)
                 _, old_ext = os.path.splitext(old_name)
                 target_name = new_name if os.path.splitext(new_name)[1] else new_name + old_ext
@@ -454,7 +496,7 @@ class FileUtilityApp:
                         report_rows.append(f"ERROR\t{src_file}\tOperation failed: {e}")
                         fail_count += 1
 
-        end_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         report_rows.append(f"Summary\tSuccessful: {success_count}\tFailed/Skipped: {fail_count}")
         report_rows.append(f"Session End\t{end_time_str}\t")
 
@@ -473,6 +515,7 @@ class FileUtilityApp:
             pass
 
         messagebox.showinfo("Done", f"Operation finished!\nSuccessful: {success_count}\nFailed/Skipped: {fail_count}")
+
 
 if __name__ == "__main__":
     root = tk.Tk()
