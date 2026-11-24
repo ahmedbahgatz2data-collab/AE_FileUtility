@@ -2,6 +2,7 @@ import os
 import json
 import shutil
 import sys
+import time
 import threading
 import urllib.request
 import tkinter as tk
@@ -75,14 +76,12 @@ class FileUtilityApp:
         self.bind_drag_and_drop()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        # Silent background update check on startup
         threading.Thread(target=self.check_updates_worker, args=(False,), daemon=True).start()
 
     def create_widgets(self):
         main_frame = ttk.Frame(self.root, padding=14)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # 0. Top Bar: Template + Check for Updates
         top_bar = ttk.LabelFrame(main_frame, text=" 📥 Quick Start & Updates ", padding=8)
         top_bar.pack(fill=tk.X, pady=(0, 8))
 
@@ -96,7 +95,6 @@ class FileUtilityApp:
         btn_download_template = ttk.Button(top_bar, text="Download Template", command=self.download_template)
         btn_download_template.pack(side=tk.RIGHT, padx=4)
 
-        # 1. File Selection & Smart Filters
         file_frame = ttk.LabelFrame(main_frame, text=" 📂 1. TXT List & Smart Filters ", padding=10)
         file_frame.pack(fill=tk.X, pady=(0, 8))
 
@@ -136,7 +134,6 @@ class FileUtilityApp:
         self.entry_filter_mb = ttk.Entry(f_row1, textvariable=self.filter_max_mb_var, width=7)
         self.entry_filter_mb.pack(side=tk.LEFT)
 
-        # 2 & 3. Action & Overwrite Options
         options_container = ttk.Frame(main_frame)
         options_container.pack(fill=tk.X, pady=(0, 8))
 
@@ -157,7 +154,6 @@ class FileUtilityApp:
         self.rb_ow_3 = ttk.Radiobutton(self.overwrite_frame, text="Skip existing", variable=self.overwrite_choice, value=3)
         self.rb_ow_3.pack(anchor=tk.W, pady=2)
 
-        # Action Buttons: Preview + Run
         action_btns = ttk.Frame(main_frame)
         action_btns.pack(fill=tk.X, pady=(0, 5))
 
@@ -170,7 +166,6 @@ class FileUtilityApp:
         self.progress = ttk.Progressbar(main_frame, orient="horizontal", mode="determinate")
         self.progress.pack(fill=tk.X, pady=(0, 8))
 
-        # Live Log Area
         log_frame = ttk.LabelFrame(main_frame, text=" 💻 Live Output & Logs ", padding=8)
         log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
@@ -181,7 +176,6 @@ class FileUtilityApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text.config(yscrollcommand=scrollbar.set)
 
-        # Bottom Bar
         bottom_bar = ttk.Frame(main_frame)
         bottom_bar.pack(fill=tk.X)
 
@@ -235,13 +229,11 @@ class FileUtilityApp:
         if not paths:
             return
 
-        # If a single .txt file is dropped, use it directly as the list file
         if len(paths) == 1 and paths[0].lower().endswith(".txt") and os.path.isfile(paths[0]):
             self.list_path_var.set(paths[0])
             self.log_message(f"[DND] Loaded TXT list: {paths[0]}")
             return
 
-        # Otherwise collect files from dropped files/folders into a generated TXT list
         collected_files = []
         for p in paths:
             if os.path.isfile(p):
@@ -272,93 +264,135 @@ class FileUtilityApp:
         self.log_message("[UPDATE] Checking GitHub releases...")
         threading.Thread(target=self.check_updates_worker, args=(True,), daemon=True).start()
 
+    def _fetch_url_with_retry(self, url, timeout=15, retries=3, bypass_proxy=False):
+        last_err = None
+        openers = []
+        if bypass_proxy:
+            openers.append(urllib.request.build_opener(urllib.request.ProxyHandler({})))
+        openers.append(urllib.request.build_opener())
+
+        for opener in openers:
+            for attempt in range(1, retries + 1):
+                try:
+                    req = urllib.request.Request(
+                        url,
+                        headers={
+                            "User-Agent": "AE_FileUtility-Updater",
+                            "Accept": "application/vnd.github+json",
+                            "Connection": "close",
+                        },
+                    )
+                    with opener.open(req, timeout=timeout) as resp:
+                        return resp.read()
+                except Exception as e:
+                    last_err = e
+                    if attempt < retries:
+                        time.sleep(1.5 * attempt)
+        raise last_err if last_err else RuntimeError("Network request failed")
+
+    def _download_file_with_retry(self, url, dest_path, timeout=45, retries=3):
+        last_err = None
+        for opener in (urllib.request.build_opener(), urllib.request.build_opener(urllib.request.ProxyHandler({}))):
+            for attempt in range(1, retries + 1):
+                try:
+                    req = urllib.request.Request(
+                        url,
+                        headers={
+                            "User-Agent": "AE_FileUtility-Updater",
+                            "Connection": "close",
+                        },
+                    )
+                    with opener.open(req, timeout=timeout) as dl_resp, open(dest_path, "wb") as out_f:
+                        shutil.copyfileobj(dl_resp, out_f)
+                    if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
+                        return
+                except Exception as e:
+                    last_err = e
+                    try:
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                    except Exception:
+                        pass
+                    if attempt < retries:
+                        time.sleep(2 * attempt)
+        raise last_err if last_err else RuntimeError("Download failed")
+
     def check_updates_worker(self, verbose=False):
         try:
             api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-            req = urllib.request.Request(
-                api_url,
-                headers={
-                    "User-Agent": "AE_FileUtility-Updater",
-                    "Accept": "application/vnd.github+json",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=8) as response:
-                data = json.loads(response.read().decode("utf-8"))
-                latest_tag = str(data.get("tag_name", "")).strip()
-                latest_version = latest_tag.lstrip("vV")
+            try:
+                raw_bytes = self._fetch_url_with_retry(api_url, timeout=15, retries=3, bypass_proxy=False)
+            except Exception:
+                raw_bytes = self._fetch_url_with_retry(api_url, timeout=15, retries=2, bypass_proxy=True)
 
-                if not latest_version or latest_version == CURRENT_VERSION.lstrip("vV"):
-                    if verbose:
-                        self.root.after(0, lambda: self.log_message(f"[UPDATE] Already on latest version (v{CURRENT_VERSION})."))
-                        self.root.after(0, lambda: messagebox.showinfo("Updates", f"You are already using the latest version (v{CURRENT_VERSION})."))
-                    return
+            data = json.loads(raw_bytes.decode("utf-8"))
+            latest_tag = str(data.get("tag_name", "")).strip()
+            latest_version = latest_tag.lstrip("vV")
 
-                if not getattr(sys, "frozen", False):
-                    if verbose:
-                        self.root.after(0, lambda v=latest_tag: self.log_message(f"[UPDATE] Newer release available: {v} (running from source)."))
-                    return
+            if not latest_version or latest_version == CURRENT_VERSION.lstrip("vV"):
+                if verbose:
+                    self.root.after(0, lambda: self.log_message(f"[UPDATE] Already on latest version (v{CURRENT_VERSION})."))
+                    self.root.after(0, lambda: messagebox.showinfo("Updates", f"You are already using the latest version (v{CURRENT_VERSION})."))
+                return
 
-                asset_found = False
-                for asset in data.get("assets", []):
-                    if asset.get("name") == "AE_FileUtility.exe":
-                        asset_found = True
-                        download_url = asset.get("browser_download_url")
-                        if not download_url:
-                            break
+            if not getattr(sys, "frozen", False):
+                if verbose:
+                    self.root.after(0, lambda v=latest_tag: self.log_message(f"[UPDATE] Newer release available: {v} (running from source)."))
+                return
 
-                        temp_dir = os.environ.get("TEMP", os.getcwd())
-                        temp_exe = os.path.join(temp_dir, "AE_FileUtility_update_new.exe")
-                        batch_path = os.path.join(temp_dir, "AE_FileUtility_apply_update.bat")
-                        current_exe = sys.executable
-                        current_pid = os.getpid()
-
-                        dl_req = urllib.request.Request(
-                            download_url,
-                            headers={"User-Agent": "AE_FileUtility-Updater"},
-                        )
-                        with urllib.request.urlopen(dl_req, timeout=30) as dl_resp, open(temp_exe, "wb") as out_f:
-                            shutil.copyfileobj(dl_resp, out_f)
-
-                        if not os.path.exists(temp_exe) or os.path.getsize(temp_exe) == 0:
-                            break
-
-                        bat_script = (
-                            "@echo off\n"
-                            "setlocal\n"
-                            f"set \"PID={current_pid}\"\n"
-                            f"set \"NEW_EXE={temp_exe}\"\n"
-                            f"set \"TARGET_EXE={current_exe}\"\n"
-                            ":wait_loop\n"
-                            "tasklist /FI \"PID eq %PID%\" 2>nul | find \"%PID%\" >nul\n"
-                            "if not errorlevel 1 (\n"
-                            "    timeout /t 1 /nobreak >nul\n"
-                            "    goto wait_loop\n"
-                            ")\n"
-                            "timeout /t 1 /nobreak >nul\n"
-                            "move /y \"%NEW_EXE%\" \"%TARGET_EXE%\" >nul 2>&1\n"
-                            "if errorlevel 1 (\n"
-                            "    copy /y \"%NEW_EXE%\" \"%TARGET_EXE%\" >nul 2>&1\n"
-                            "    del /f /q \"%NEW_EXE%\" >nul 2>&1\n"
-                            ")\n"
-                            "start \"\" \"%TARGET_EXE%\"\n"
-                            "del /f /q \"%~f0\" >nul 2>&1\n"
-                        )
-                        with open(batch_path, "w", encoding="utf-8") as b_file:
-                            b_file.write(bat_script)
-
-                        self.update_ready = True
-                        self.root.after(0, lambda v=latest_tag: self.log_message(f"[UPDATE] {v} downloaded silently; will apply on exit."))
-                        if verbose:
-                            self.root.after(
-                                0,
-                                lambda v=latest_tag: messagebox.showinfo(
-                                    "Update Ready", f"Version {v} has been downloaded and will apply automatically when you close the app."
-                                ),
-                            )
+            asset_found = False
+            for asset in data.get("assets", []):
+                if asset.get("name") == "AE_FileUtility.exe":
+                    asset_found = True
+                    download_url = asset.get("browser_download_url")
+                    if not download_url:
                         break
 
-                if not asset_found and verbose:
-                    self.root.after(0, lambda v=latest_tag: self.log_message(f"[UPDATE] Release {v} found, but AE_FileUtility.exe asset was not attached."))
+                    temp_dir = os.environ.get("TEMP", os.getcwd())
+                    temp_exe = os.path.join(temp_dir, "AE_FileUtility_update_new.exe")
+                    batch_path = os.path.join(temp_dir, "AE_FileUtility_apply_update.bat")
+                    current_exe = sys.executable
+                    current_pid = os.getpid()
+
+                    self._download_file_with_retry(download_url, temp_exe, timeout=45, retries=3)
+
+                    bat_script = (
+                        "@echo off\n"
+                        "setlocal\n"
+                        f"set \"PID={current_pid}\"\n"
+                        f"set \"NEW_EXE={temp_exe}\"\n"
+                        f"set \"TARGET_EXE={current_exe}\"\n"
+                        ":wait_loop\n"
+                        "tasklist /FI \"PID eq %PID%\" 2>nul | find \"%PID%\" >nul\n"
+                        "if not errorlevel 1 (\n"
+                        "    timeout /t 1 /nobreak >nul\n"
+                        "    goto wait_loop\n"
+                        ")\n"
+                        "timeout /t 1 /nobreak >nul\n"
+                        "move /y \"%NEW_EXE%\" \"%TARGET_EXE%\" >nul 2>&1\n"
+                        "if errorlevel 1 (\n"
+                        "    copy /y \"%NEW_EXE%\" \"%TARGET_EXE%\" >nul 2>&1\n"
+                        "    del /f /q \"%NEW_EXE%\" >nul 2>&1\n"
+                        ")\n"
+                        "start \"\" \"%TARGET_EXE%\"\n"
+                        "del /f /q \"%~f0\" >nul 2>&1\n"
+                    )
+                    with open(batch_path, "w", encoding="utf-8") as b_file:
+                        b_file.write(bat_script)
+
+                    self.update_ready = True
+                    self.root.after(0, lambda v=latest_tag: self.log_message(f"[UPDATE] {v} downloaded silently; will apply on exit."))
+                    if verbose:
+                        self.root.after(
+                            0,
+                            lambda v=latest_tag: messagebox.showinfo(
+                                "Update Ready", f"Version {v} has been downloaded and will apply automatically when you close the app."
+                            ),
+                        )
+                    break
+
+            if not asset_found and verbose:
+                self.root.after(0, lambda v=latest_tag: self.log_message(f"[UPDATE] Release {v} found, but AE_FileUtility.exe asset was not attached."))
         except Exception as e:
             if verbose:
                 self.root.after(0, lambda err=e: self.log_message(f"[UPDATE] Check failed: {err}"))
